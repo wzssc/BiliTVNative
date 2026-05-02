@@ -1,6 +1,6 @@
 # BiliTVNative
 
-BiliTVNative 是一个面向 Android TV 的原生 B 站客户端实验项目，使用 Kotlin、Jetpack Compose、Compose for TV 和 Media3 重写原 Flutter 版 BiliTV 的主要体验。
+BiliTVNative 是一个面向 Android TV 的原生 B 站客户端实验项目，使用 Kotlin、Jetpack Compose、Compose for TV 和 Media3 完全由AI重写的原 Flutter 版 BiliTV 的主要体验。
 
 项目目标很简单：在电视设备上获得更轻的安装包、更低的内存占用，以及更可控的遥控器焦点体验。
 
