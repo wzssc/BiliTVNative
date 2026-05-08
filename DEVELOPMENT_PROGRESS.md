@@ -1,6 +1,6 @@
 # BiliTVNative 开发进度
 
-最后更新：2026-05-03
+最后更新：2026-05-08
 
 ## 更新规则
 
@@ -14,7 +14,7 @@
 
 当前阶段：真实二维码登录、首页、搜索、动态、历史、设置、点播播放器、字节跳动弹幕叠加层、空降助手、发布构建和 TV 图标/横幅均已接入；直播播放暂缓，后续单独评估。
 
-推荐下一项：继续收尾 `P6` 体验和稳定性，优先处理首页/动态/历史切换卡顿、设置/焦点回归边界、文档一致性和本地化遗漏；Room 迁移仅在播放进度/历史需要结构化查询、清理或同步时再启动。
+推荐下一项：继续收尾 `P7` 主页主题与视觉效果专项。播放器不参与主页主题化，重点保持三档视觉性能模式、4 种主页主题、假玻璃主页外观和精致档环境高光/主题色流光的一致性。
 
 ## P0 项目决策与规则
 
@@ -177,3 +177,23 @@
 | P6-15 | 发布包体编译压缩 | Done | 发布构建增加 `androidResources.localeFilters`，仅保留默认、简中、香港繁中和台湾繁中资源，并排除依赖嵌套 LICENSE 文本；APK 从 `6,186,139` bytes 降至 `5,719,171` bytes，主要减少 `resources.arsc`；`assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装 `192.168.1.195:5555` 并启动无崩溃 |
 | P6-16 | 根目录文档英文残留中文化 | Done | 已将 `AGENTS.md`、`DEVELOPMENT_PLAN.md`、`DEVELOPMENT_PROGRESS.md` 中面向读者的英文说明翻译为中文；保留命令、API、类名、构建类型和状态值；`rg` 检查后剩余英文主要为技术标识 |
 | P6-17 | GitHub 上传前无用文件清理 | Done | 删除本机生成目录 `.gradle/`、`.kotlin/`、`build/`、`app/build/` 和本机 SDK 配置 `local.properties`；补充 `.gitignore` 忽略 `.kotlin/`、NDK/外部构建目录和 APK/AAB 产物；删除 0 引用资源 `ic_player_like.xml`、`ic_banner.png`；`rg --files --hidden` 确认剩余文件为源码、资源、Gradle wrapper 和文档 |
+
+## P7 主页主题与视觉效果
+
+| ID | 任务 | 状态 | 验收/备注 |
+| --- | --- | --- | --- |
+| P7-01 | 将视觉性能模式扩展为流畅/均衡/精致三档 | Done | 已新增流畅/均衡/精致三档策略并通过 DataStore 持久化；低于 1GB 首次启动默认流畅，其余默认均衡；精致档必须用户手动开启；`assembleDebug` 通过 |
+| P7-02 | 新增 4 种主页主题设置和持久化 | Done | 已新增默认粉、深黑、高级灰、蓝灰 4 种主题，设置页可切换并通过 DataStore 持久化；播放器暂不跟随主页主题 |
+| P7-03 | 建立主页专用主题色系统 | Done | 已新增 `HomeColorScheme` 和 `LocalHomeColors`；首页、搜索、动态、历史、设置、侧边栏和标签栏读取主页主题 |
+| P7-04 | 实现主页玻璃背景 | Done | 已接入主题渐变背景；精致模式额外启用环境高光，流畅模式不启用额外动态视觉 |
+| P7-05 | 重做侧边导航玻璃样式 | Done | 侧边栏改为半透明玻璃竖栏、轻边框和主题色焦点反馈，头像、图标、选中态跟随主题色 |
+| P7-06 | 重做主页/搜索标签栏玻璃样式 | Done | 首页分类和搜索排序标签使用主题色文字与焦点边框，继续保留无实心背景并避让顶部时钟 |
+| P7-07 | 重做视频卡片玻璃材质 | Done | 卡片信息区使用半透明玻璃层；获焦保留细边框、轻提亮、文字颜色过渡和克制缩放；流畅模式关闭动画和阴影 |
+| P7-08 | 增加精致模式主题色斜向流光效果 | Done | 精致模式下焦点卡片使用单个跟随焦点的小尺寸 overlay 绘制斜向流光；切到卡片后先等 2 秒再扫，后续约每 5 秒扫一次，颜色跟随当前主页主题 |
+| P7-09 | 主页视觉性能回归测试 | Done | `assembleRelease -PtargetAbi=armeabi-v7a` 通过并已安装 `192.168.1.131:5555`；基础 D-pad smoke test 无 `FATAL EXCEPTION`；`gfxinfo` 52 帧 jank 0.00%，P50 11ms、P90 18ms、P95 31ms、P99 42ms；PSS 约 85.6MB |
+| P7-10 | 静态规则复查修正 | Done | 播放器打开时不再组合主页层，主页背景动画、卡片阴影/流光和封面预取随主页 Composable 一起释放；均衡档关闭封面实时模糊；主页主题颜色收口到 `BiliTokens.kt`；`assembleDebug` 和 `assembleRelease -PtargetAbi=armeabi-v7a` 通过 |
+| P7-11 | 卡片跨行滚动裁切回退 | Done | 撤回安全区触发、目标舒适区、额外视觉余量、行留白和 `zIndex` 试验，恢复 `TvVideoGrid` 稳定顶齐滚动与换行前等帧，避免上下焦点卡片被裁切；`assembleDebug` 和 `assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装 `192.168.1.131:5555` |
+| P7-12 | 对齐 Flutter 版跨行滚动手感 | Done | 参考 Flutter 版 `ScrollController.animateTo` 的 `500ms + easeOutCubic`，Native 仅调整 `animateScrollBy` 的滚动时长和滚动专用曲线，不改可视边界、行留白、缩放或目标行定位；`assembleDebug` 和 `assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装 `192.168.1.131:5555` |
+| P7-13 | MT9655 电视 UI 性能限制策略 | Done | 针对 MT9655 或 `MiTV-MFFU1` 小米电视启用受限 TV UI 策略：保留平滑滚动和基础焦点动效，但关闭焦点阴影、精致/电影视觉、焦点封面模糊和大规模封面预取，封面降为 480x270 RGB_565、预取降为 8；`assembleDebug` 和 `assembleRelease -PtargetAbi=armeabi-v7a` 通过；已安装 `192.168.1.195:5555`，Sony Android 9 约 2.26GB 内存，模拟方向键后 P50 53ms/P95 69ms，仍比 210 旧数据 P50 93ms/P95 150ms 轻；210 设备在线后再安装实测 |
+| P7-14 | 全局焦点特效层试验 | Done | `TvVideoGrid` 将方向键网格内移动的父级焦点状态写回改为离开网格/点击播放时提交，降低父级重组；卡片本体关闭真实焦点阴影，精致模式流光改为单个跟随焦点卡片的小尺寸 overlay 绘制，避免每张卡片各自跑流光；`assembleDebug` 和 `assembleRelease -PtargetAbi=armeabi-v7a` 通过，已安装 `192.168.1.195:5555`；195 实测 P50 53ms/P95 约 77-81ms，较 69ms 基线未明显改善，下一步应准备 RecyclerView/DpadRecyclerView 网格对照方案 |
+| P7-15 | 播放器进出场黑屏过渡与静态约束复查 | Done | 黑屏遮罩转场改为 `BiliMotion` token，时长收短为进入 90ms、保持 10ms、退出 90ms；静态检查确认未恢复 `AnimatedVisibility` 缩放/淡入淡出，未对视频 `SurfaceView` 本体做变换，主页与播放器按 `visiblePlaybackRequest` 互斥组合，播放器显示后主页背景动画、卡片流光/阴影和封面预取会随主页 Composable 释放；本轮按要求未编译安装 |

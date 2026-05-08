@@ -68,7 +68,6 @@ import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.core.network.VideoRepository
 import com.kirin.bilitv.core.storage.SearchHistoryStore
 import com.kirin.bilitv.ui.common.FeedStatusScreen
-import com.kirin.bilitv.ui.common.VideoThumbnailPrefetcher
 import com.kirin.bilitv.ui.common.VideoGridSkeleton
 import com.kirin.bilitv.ui.focus.BiliFocusableSurface
 import com.kirin.bilitv.ui.home.TvVideoGrid
@@ -82,6 +81,7 @@ import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
+import com.kirin.bilitv.ui.theme.LocalHomeColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -198,81 +198,86 @@ private fun SearchKeyboardView(
   onClearSearchHistory: () -> Unit,
   onSearch: (String) -> Unit,
 ) {
-  Row(
-    modifier = Modifier.fillMaxSize(),
-    verticalAlignment = Alignment.Top,
+  Column(
+    modifier = Modifier
+      .fillMaxSize()
+      .padding(BiliSizing.ContentPadding),
   ) {
-    Column(
-      modifier = Modifier
-        .width(BiliSizing.SearchKeyboardPanelWidth)
-        .fillMaxHeight()
-        .background(BiliColors.Surface)
-        .padding(horizontal = BiliSpacing.Xl, vertical = BiliSpacing.Xl),
-      verticalArrangement = Arrangement.Top,
+    Row(
+      modifier = Modifier.fillMaxSize(),
+      verticalAlignment = Alignment.Top,
     ) {
-      SearchInputText(searchText = searchText)
-      Spacer(modifier = Modifier.height(BiliSpacing.Lg))
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Md),
+      Column(
         modifier = Modifier
-          .fillMaxWidth()
-          .height(BiliSizing.SearchKeyboardButtonHeight),
+          .width(BiliSizing.SearchKeyboardPanelWidth)
+          .fillMaxHeight(),
+        verticalArrangement = Arrangement.Top,
       ) {
-        SearchKeyboardButton(
-          label = stringResource(R.string.search_action_clear),
+        SearchInputText(searchText = searchText)
+        Spacer(modifier = Modifier.height(BiliSpacing.Md))
+        Row(
+          horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Md),
           modifier = Modifier
-            .weight(1f)
-            .focusRequester(keyboardFocusRequester),
+            .fillMaxWidth()
+            .height(BiliSizing.SearchKeyboardButtonHeight),
+        ) {
+          SearchKeyboardButton(
+            label = stringResource(R.string.search_action_clear),
+            modifier = Modifier
+              .weight(1f)
+              .focusRequester(keyboardFocusRequester),
+            onMoveLeft = onMoveLeftToNav,
+            onClick = {
+              onTextChange("")
+            },
+          )
+          SearchKeyboardButton(
+            label = stringResource(R.string.search_action_backspace),
+            modifier = Modifier.weight(1f),
+            onClick = {
+              if (searchText.isNotEmpty()) {
+                onTextChange(searchText.dropLast(1))
+              }
+            },
+          )
+        }
+        Spacer(modifier = Modifier.height(BiliSpacing.Md))
+        SearchKeyGrid(
+          onKeyClick = { key ->
+            onTextChange(searchText + key)
+          },
+          onMoveLeftToNav = onMoveLeftToNav,
+        )
+        Spacer(modifier = Modifier.height(BiliSpacing.Lg))
+        SearchKeyboardButton(
+          label = stringResource(R.string.search_action_search),
+          action = true,
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(BiliSizing.SearchKeyboardButtonHeight),
           onMoveLeft = onMoveLeftToNav,
           onClick = {
-            onTextChange("")
-          },
-        )
-        SearchKeyboardButton(
-          label = stringResource(R.string.search_action_backspace),
-          modifier = Modifier.weight(1f),
-          onClick = {
-            if (searchText.isNotEmpty()) {
-              onTextChange(searchText.dropLast(1))
-            }
+            onSearch(searchText)
           },
         )
       }
-      Spacer(modifier = Modifier.height(BiliSpacing.Md))
-      SearchKeyGrid(
-        onKeyClick = { key ->
-          onTextChange(searchText + key)
+      SearchSuggestionPanel(
+        searchText = searchText,
+        suggestions = suggestions,
+        searchHistory = searchHistory,
+        onSuggestionSelected = { suggestion ->
+          onSearch(suggestion)
         },
-        onMoveLeftToNav = onMoveLeftToNav,
-      )
-      Spacer(modifier = Modifier.height(BiliSpacing.Lg))
-      SearchKeyboardButton(
-        label = stringResource(R.string.search_action_search),
-        action = true,
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(BiliSizing.SearchKeyboardButtonHeight),
-        onMoveLeft = onMoveLeftToNav,
-        onClick = {
-          onSearch(searchText)
-        },
+        onClearSearchHistory = onClearSearchHistory,
+        modifier = Modifier.weight(1f),
       )
     }
-    SearchSuggestionPanel(
-      searchText = searchText,
-      suggestions = suggestions,
-      searchHistory = searchHistory,
-      onSuggestionSelected = { suggestion ->
-        onSearch(suggestion)
-      },
-      onClearSearchHistory = onClearSearchHistory,
-      modifier = Modifier.weight(1f),
-    )
   }
 }
 
 @Composable
 private fun SearchInputText(searchText: String) {
+  val homeColors = LocalHomeColors.current
   val placeholder = stringResource(R.string.search_input_placeholder)
   val displayText = if (searchText.isBlank()) placeholder else convertChineseText(searchText)
 
@@ -280,13 +285,13 @@ private fun SearchInputText(searchText: String) {
     modifier = Modifier
       .fillMaxWidth()
       .height(BiliSizing.SearchInputHeight)
-      .background(BiliColors.SurfaceElevated, RoundedCornerShape(BiliRadius.Card))
+      .background(homeColors.glassSurfaceStrong, RoundedCornerShape(BiliRadius.Card))
       .padding(horizontal = BiliSpacing.Lg),
     contentAlignment = Alignment.CenterStart,
   ) {
     Text(
       text = displayText,
-      color = if (searchText.isBlank()) BiliColors.TextTertiary else BiliColors.TextPrimary,
+      color = if (searchText.isBlank()) homeColors.textTertiary else homeColors.textPrimary,
       fontSize = BiliTypography.SearchInput,
       fontWeight = FontWeight.Bold,
       maxLines = 1,
@@ -334,6 +339,7 @@ private fun SearchKeyboardButton(
   onMoveLeft: (() -> Boolean)? = null,
   onClick: () -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   BiliFocusableSurface(
     scaleOnFocus = false,
     shape = RoundedCornerShape(BiliRadius.Card),
@@ -353,7 +359,7 @@ private fun SearchKeyboardButton(
     ) {
       Text(
         text = label,
-        color = if (action) BiliColors.BiliPink else BiliColors.TextSecondary,
+        color = if (action) homeColors.accent else homeColors.textSecondary,
         fontSize = BiliTypography.Body,
         fontWeight = FontWeight.Bold,
       )
@@ -370,10 +376,11 @@ private fun SearchSuggestionPanel(
   onClearSearchHistory: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val homeColors = LocalHomeColors.current
   Box(
     modifier = modifier
       .fillMaxHeight()
-      .padding(start = BiliSpacing.Xxl),
+      .padding(start = BiliSpacing.Xl),
   ) {
     if (searchText.isBlank()) {
       if (searchHistory.isEmpty()) {
@@ -390,13 +397,13 @@ private fun SearchSuggestionPanel(
     } else {
       LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = BiliSpacing.Xl),
+        contentPadding = PaddingValues(vertical = BiliSpacing.Md),
         verticalArrangement = Arrangement.spacedBy(BiliSpacing.Sm),
       ) {
         item {
           Text(
             text = stringResource(R.string.search_suggestions_title),
-            color = BiliColors.TextSecondary,
+            color = homeColors.textSecondary,
             fontSize = BiliTypography.SectionTitle,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = BiliSpacing.Sm),
@@ -422,15 +429,16 @@ private fun SearchHistoryList(
   onHistorySelected: (String) -> Unit,
   onClearSearchHistory: () -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
-    contentPadding = PaddingValues(vertical = BiliSpacing.Xl),
+    contentPadding = PaddingValues(vertical = BiliSpacing.Md),
     verticalArrangement = Arrangement.spacedBy(BiliSpacing.Sm),
   ) {
     item {
       Text(
         text = stringResource(R.string.search_history_title),
-        color = BiliColors.TextSecondary,
+        color = homeColors.textSecondary,
         fontSize = BiliTypography.SectionTitle,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(bottom = BiliSpacing.Sm),
@@ -456,13 +464,14 @@ private fun SearchHistoryList(
 
 @Composable
 private fun SearchHintText(text: String) {
+  val homeColors = LocalHomeColors.current
   Box(
     modifier = Modifier.fillMaxSize(),
     contentAlignment = Alignment.Center,
   ) {
     Text(
       text = text,
-      color = BiliColors.TextTertiary,
+      color = homeColors.textTertiary,
       fontSize = BiliTypography.Body,
       fontWeight = FontWeight.Medium,
     )
@@ -475,6 +484,7 @@ private fun SearchSuggestionItem(
   displayText: String = text,
   onClick: () -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   BiliFocusableSurface(
     scaleOnFocus = false,
     shape = RoundedCornerShape(BiliRadius.Card),
@@ -491,7 +501,7 @@ private fun SearchSuggestionItem(
     ) {
       Text(
         text = displayText,
-        color = BiliColors.TextSecondary,
+        color = homeColors.textSecondary,
         fontSize = BiliTypography.Body,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -671,13 +681,14 @@ private fun SearchResultsHeader(
   onMoveLeftToNav: () -> Boolean,
   onOrderSelected: (String) -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   Column(
     modifier = Modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(BiliSpacing.Md),
   ) {
     Text(
       text = stringResource(R.string.search_results_title, convertChineseText(query)),
-      color = BiliColors.TextPrimary,
+      color = homeColors.textPrimary,
       fontSize = BiliTypography.SectionTitle,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.padding(horizontal = BiliSizing.SearchVideoGridHorizontalPadding),
@@ -723,12 +734,13 @@ private fun SearchSortButton(
 ) {
   var focused by remember { mutableStateOf(false) }
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val shape = RoundedCornerShape(BiliRadius.Pill)
-  val targetBorderColor = if (focused) BiliColors.BiliPink else BiliColors.Transparent
+  val targetBorderColor = if (focused) homeColors.accent else BiliColors.Transparent
   val targetTextColor = when {
-    selected -> BiliColors.BiliPink
-    focused -> BiliColors.TextPrimary
-    else -> BiliColors.TextSecondary
+    selected -> homeColors.accent
+    focused -> homeColors.textPrimary
+    else -> homeColors.textSecondary
   }
   val borderWidth = if (performancePolicy.motionEnabled) {
     animateDpAsState(

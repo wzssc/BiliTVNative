@@ -15,8 +15,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 class AppSettingsStore(private val context: Context) {
-  private val defaultLowSpecMode by lazy(LazyThreadSafetyMode.NONE) {
-    context.shouldEnableLowSpecModeByDefault()
+  private val defaultVisualPerformanceMode by lazy(LazyThreadSafetyMode.NONE) {
+    context.defaultVisualPerformanceMode()
   }
 
   val settings: Flow<AppSettings> = context.biliDataStore.data.map { preferences ->
@@ -29,8 +29,17 @@ class AppSettingsStore(private val context: Context) {
     val autoConfirmOnFocus = preferences[Keys.AutoConfirmOnFocus] ?: false
     val autoRefreshOnSwitch = autoConfirmOnFocus && (preferences[Keys.AutoRefreshOnSwitch] ?: false)
 
+    val visualPerformanceMode = preferences[Keys.VisualPerformanceMode]
+      ?.let(AppVisualPerformanceMode::fromKey)
+      ?: if (preferences[Keys.LowSpecMode] == true) {
+        AppVisualPerformanceMode.Smooth
+      } else {
+        defaultVisualPerformanceMode
+      }
+
     AppSettings(
-      lowSpecMode = preferences[Keys.LowSpecMode] ?: defaultLowSpecMode,
+      visualPerformanceMode = visualPerformanceMode,
+      homeThemeVariant = HomeThemeVariant.fromKey(preferences[Keys.HomeThemeVariant]),
       chineseTextVariant = ChineseTextVariant.fromKey(preferences[Keys.ChineseTextVariant]),
       playbackQualityPreference = PlaybackQualityPreference.fromKey(preferences[Keys.PlaybackQualityPreference]),
       playbackCodecPreference = PlaybackCodecPreference.fromKey(preferences[Keys.PlaybackCodecPreference]),
@@ -48,8 +57,19 @@ class AppSettingsStore(private val context: Context) {
   }
 
   suspend fun setLowSpecMode(enabled: Boolean) {
+    setVisualPerformanceMode(if (enabled) AppVisualPerformanceMode.Smooth else AppVisualPerformanceMode.Balanced)
+  }
+
+  suspend fun setVisualPerformanceMode(mode: AppVisualPerformanceMode) {
     context.biliDataStore.edit { preferences ->
-      preferences[Keys.LowSpecMode] = enabled
+      preferences[Keys.VisualPerformanceMode] = mode.key
+      preferences[Keys.LowSpecMode] = mode == AppVisualPerformanceMode.Smooth
+    }
+  }
+
+  suspend fun setHomeThemeVariant(variant: HomeThemeVariant) {
+    context.biliDataStore.edit { preferences ->
+      preferences[Keys.HomeThemeVariant] = variant.key
     }
   }
 
@@ -147,6 +167,8 @@ class AppSettingsStore(private val context: Context) {
 
   private object Keys {
     val LowSpecMode = booleanPreferencesKey("low_spec_mode")
+    val VisualPerformanceMode = stringPreferencesKey("visual_performance_mode")
+    val HomeThemeVariant = stringPreferencesKey("home_theme_variant")
     val ChineseTextVariant = stringPreferencesKey("chinese_text_variant")
     val PlaybackQualityPreference = stringPreferencesKey("playback_quality_preference")
     val PlaybackCodecPreference = stringPreferencesKey("playback_codec_preference")
@@ -163,11 +185,15 @@ class AppSettingsStore(private val context: Context) {
   }
 }
 
-private fun Context.shouldEnableLowSpecModeByDefault(): Boolean {
-  val activityManager = getSystemService(ActivityManager::class.java) ?: return false
+private fun Context.defaultVisualPerformanceMode(): AppVisualPerformanceMode {
+  val activityManager = getSystemService(ActivityManager::class.java) ?: return AppVisualPerformanceMode.Balanced
   val memoryInfo = ActivityManager.MemoryInfo()
   activityManager.getMemoryInfo(memoryInfo)
-  return memoryInfo.totalMem > 0L && memoryInfo.totalMem < LowSpecDefaultMemoryThresholdBytes
+  return if (memoryInfo.totalMem > 0L && memoryInfo.totalMem < SmoothDefaultMemoryThresholdBytes) {
+    AppVisualPerformanceMode.Smooth
+  } else {
+    AppVisualPerformanceMode.Balanced
+  }
 }
 
-private const val LowSpecDefaultMemoryThresholdBytes = 1024L * 1024L * 1024L
+private const val SmoothDefaultMemoryThresholdBytes = 1024L * 1024L * 1024L

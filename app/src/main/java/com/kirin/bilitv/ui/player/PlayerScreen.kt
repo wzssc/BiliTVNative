@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -154,6 +155,8 @@ fun PlayerScreen(
   var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
   var previewPositionMs by remember { mutableStateOf<Long?>(null) }
   var positionMs by remember { mutableLongStateOf(0L) }
+  val danmakuPositionState = rememberUpdatedState(positionMs)
+  var danmakuSyncToken by remember { mutableLongStateOf(0L) }
   var durationMs by remember { mutableLongStateOf(0L) }
   var bufferedPercentage by remember { mutableLongStateOf(0L) }
   var playbackPaused by remember { mutableStateOf(false) }
@@ -255,6 +258,14 @@ fun PlayerScreen(
     controlsVisible = false
   }
 
+  fun toggleControlsFromRemoteMenu() {
+    if (!playbackPaused && controlsVisible && activePanel == PlayerPanel.None && previewPositionMs == null) {
+      hideControlsForPlayback()
+    } else {
+      showControls()
+    }
+  }
+
   fun maxDurationMs(): Long {
     return player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: durationMs.coerceAtLeast(0L)
   }
@@ -278,6 +289,7 @@ fun PlayerScreen(
     val target = previewPositionMs ?: return
     player.seekTo(target.coerceIn(0L, maxDurationMs().takeIf { it > 0L } ?: Long.MAX_VALUE))
     positionMs = target
+    danmakuSyncToken += 1L
     previewPositionMs = null
     if (revealControls) {
       showControls()
@@ -338,6 +350,7 @@ fun PlayerScreen(
       warnedAirJumpIds = warnedAirJumpIds + hitSegment.id
       player.seekTo(targetPositionMs)
       positionMs = targetPositionMs
+      danmakuSyncToken += 1L
       val duration = maxDurationMs().takeIf { it > 0L } ?: 0L
       if (duration <= 0L || targetPositionMs < duration - AirJumpCompletionToastSuppressMs) {
         Toast.makeText(context, context.getString(R.string.player_air_jump_skipped), Toast.LENGTH_SHORT).show()
@@ -996,6 +1009,8 @@ fun PlayerScreen(
         player.setPlaybackSpeed(playbackSpeed)
         if (startPositionMs > 0L) {
           player.seekTo(startPositionMs)
+          positionMs = startPositionMs
+          danmakuSyncToken += 1L
         }
         player.playWhenReady = true
         playbackPaused = false
@@ -1166,7 +1181,7 @@ fun PlayerScreen(
             true
           }
           Key.Menu -> {
-            showControls()
+            toggleControlsFromRemoteMenu()
             true
           }
           Key.DirectionCenter,
@@ -1238,8 +1253,8 @@ fun PlayerScreen(
           Key.DirectionDown -> {
             when {
               activePanel != PlayerPanel.None -> changePanelFocus(1)
-              controlsVisible && progressFocused -> progressFocused = false
-              else -> Unit
+              playbackPaused && controlsVisible && progressFocused -> progressFocused = false
+              else -> toggleControlsFromRemoteMenu()
             }
             true
           }
@@ -1281,7 +1296,8 @@ fun PlayerScreen(
         PlayerDanmakuLayer(
           entries = danmakuEntries,
           settings = danmakuSettings,
-          positionMs = positionMs,
+          positionState = danmakuPositionState,
+          syncToken = danmakuSyncToken,
           isPlaying = playerActuallyPlaying && previewPositionMs == null && !completionReported,
           playbackSpeed = playbackSpeed,
           lowSpecMode = performancePolicy.lowSpecMode,

@@ -34,7 +34,6 @@ import com.kirin.bilitv.R
 import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.core.network.VideoRepository
 import com.kirin.bilitv.ui.common.FeedStatusScreen
-import com.kirin.bilitv.ui.common.VideoThumbnailPrefetcher
 import com.kirin.bilitv.ui.common.VideoGridSkeleton
 import com.kirin.bilitv.ui.home.TvVideoGrid
 import com.kirin.bilitv.ui.home.VideoCard

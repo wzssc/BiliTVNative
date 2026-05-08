@@ -1,6 +1,7 @@
 package com.kirin.bilitv.ui.settings
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -35,11 +36,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -57,13 +60,16 @@ import com.kirin.bilitv.core.player.CodecCapability
 import com.kirin.bilitv.core.player.PlaybackCodecPreference
 import com.kirin.bilitv.core.player.PlaybackQualityPreference
 import com.kirin.bilitv.core.settings.AppSettings
+import com.kirin.bilitv.core.settings.AppVisualPerformanceMode
+import com.kirin.bilitv.core.settings.HomeThemeVariant
 import com.kirin.bilitv.ui.focus.BiliFocusableSurface
 import com.kirin.bilitv.ui.home.titleRes
-import com.kirin.bilitv.ui.theme.BiliColors
+import com.kirin.bilitv.ui.theme.BiliFocus
 import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
+import com.kirin.bilitv.ui.theme.LocalHomeColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -87,7 +93,8 @@ fun SettingsScreen(
   codecCapability: CodecCapability,
   firstItemFocusRequester: FocusRequester,
   onMoveLeftToNav: () -> Boolean,
-  onLowSpecModeChange: (Boolean) -> Unit,
+  onVisualPerformanceModeChange: (AppVisualPerformanceMode) -> Unit,
+  onHomeThemeVariantChange: (HomeThemeVariant) -> Unit,
   onChineseTextVariantChange: (ChineseTextVariant) -> Unit,
   onClearCache: () -> Unit,
   onSeekPreviewSpritesEnabledChange: (Boolean) -> Unit,
@@ -127,7 +134,8 @@ fun SettingsScreen(
       SettingsItemShowClock to FocusRequester(),
       SettingsItemAutoConfirmOnFocus to FocusRequester(),
       SettingsItemAutoRefreshOnSwitch to FocusRequester(),
-      SettingsItemLowSpec to FocusRequester(),
+      SettingsItemVisualPerformanceMode to FocusRequester(),
+      SettingsItemHomeThemeVariant to FocusRequester(),
     )
   }
   var lastFocusedSettingItem by remember { mutableIntStateOf(SettingsItemPlaybackQuality) }
@@ -184,7 +192,8 @@ fun SettingsScreen(
         },
         onMoveSettingFocus = ::moveSettingFocus,
         onMoveLeftToNav = onMoveLeftToNav,
-        onLowSpecModeChange = onLowSpecModeChange,
+        onVisualPerformanceModeChange = onVisualPerformanceModeChange,
+        onHomeThemeVariantChange = onHomeThemeVariantChange,
         onChineseTextVariantChange = onChineseTextVariantChange,
         onClearCache = onClearCache,
         onSeekPreviewSpritesEnabledChange = onSeekPreviewSpritesEnabledChange,
@@ -221,7 +230,8 @@ private fun SettingsBehaviorColumn(
   onSettingFocused: (Int) -> Unit,
   onMoveSettingFocus: (Int, Int) -> Boolean,
   onMoveLeftToNav: () -> Boolean,
-  onLowSpecModeChange: (Boolean) -> Unit,
+  onVisualPerformanceModeChange: (AppVisualPerformanceMode) -> Unit,
+  onHomeThemeVariantChange: (HomeThemeVariant) -> Unit,
   onChineseTextVariantChange: (ChineseTextVariant) -> Unit,
   onClearCache: () -> Unit,
   onSeekPreviewSpritesEnabledChange: (Boolean) -> Unit,
@@ -453,20 +463,46 @@ private fun SettingsBehaviorColumn(
         modifier = Modifier.padding(top = BiliSpacing.Lg),
       )
     }
-    item(key = "low-spec-mode") {
-      SettingsToggleRow(
-        title = stringResource(R.string.settings_low_spec_mode_title),
-        description = stringResource(R.string.settings_low_spec_mode_description),
-        checked = settings.lowSpecMode,
+    item(key = "visual-performance-mode") {
+      val performanceOptions = remember { AppVisualPerformanceMode.entries.toList() }
+      val effectiveMode = settings.visualPerformanceMode
+      SettingsOptionRow(
+        title = stringResource(R.string.settings_visual_performance_title),
+        description = stringResource(R.string.settings_visual_performance_description),
+        value = effectiveMode.visualPerformanceLabel(),
         modifier = Modifier
-          .focusRequester(focusRequesters.getValue(SettingsItemLowSpec))
+          .focusRequester(focusRequesters.getValue(SettingsItemVisualPerformanceMode))
           .settingsBoundaryKeys(
-            itemIndex = SettingsItemLowSpec,
+            itemIndex = SettingsItemVisualPerformanceMode,
             onMoveSettingFocus = onMoveSettingFocus,
             onMoveLeftToNav = onMoveLeftToNav,
         ),
-        onFocused = { onSettingFocused(SettingsItemLowSpec) },
-        onCheckedChange = onLowSpecModeChange,
+        onFocused = { onSettingFocused(SettingsItemVisualPerformanceMode) },
+        onClick = {
+          val currentIndex = performanceOptions.indexOf(effectiveMode).takeIf { it >= 0 } ?: 0
+          onVisualPerformanceModeChange(performanceOptions[(currentIndex + 1) % performanceOptions.size])
+        },
+      )
+    }
+    item(key = "home-theme-variant") {
+      val themeOptions = remember { HomeThemeVariant.entries.toList() }
+      val effectiveTheme = settings.homeThemeVariant
+      SettingsOptionRow(
+        title = stringResource(R.string.settings_home_theme_title),
+        description = stringResource(R.string.settings_home_theme_description),
+        value = effectiveTheme.homeThemeLabel(),
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemHomeThemeVariant))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemHomeThemeVariant,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+          ),
+        onFocused = { onSettingFocused(SettingsItemHomeThemeVariant) },
+        onClick = {
+          val currentIndex = themeOptions.indexOf(effectiveTheme).takeIf { it >= 0 } ?: 0
+          onHomeThemeVariantChange(themeOptions[(currentIndex + 1) % themeOptions.size])
+        },
       )
     }
     item(key = "clear-cache") {
@@ -533,9 +569,10 @@ private fun SettingsSectionTitle(
   text: String,
   modifier: Modifier = Modifier,
 ) {
+  val homeColors = LocalHomeColors.current
   Text(
     text = text,
-    color = BiliColors.TextSecondary,
+    color = homeColors.textSecondary,
     fontSize = BiliTypography.SectionTitle,
     fontWeight = FontWeight.Bold,
     modifier = modifier,
@@ -549,19 +586,20 @@ private fun SettingsHomeSectionsColumn(
   onHomeSectionEnabledChange: (HomeSection, Boolean) -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val homeColors = LocalHomeColors.current
   Column(
     modifier = modifier,
     verticalArrangement = Arrangement.spacedBy(BiliSpacing.Md),
   ) {
     Text(
       text = stringResource(R.string.settings_home_sections_section),
-      color = BiliColors.TextSecondary,
+      color = homeColors.textSecondary,
       fontSize = BiliTypography.SectionTitle,
       fontWeight = FontWeight.Bold,
     )
     Text(
       text = stringResource(R.string.settings_home_sections_description),
-      color = BiliColors.TextSecondary,
+      color = homeColors.textSecondary,
       fontSize = BiliTypography.BodySmall,
     )
     LazyVerticalGrid(
@@ -598,21 +636,34 @@ private fun HomeSectionChip(
   modifier: Modifier = Modifier,
   onClick: () -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
+  val chipShape = RoundedCornerShape(BiliRadius.Pill)
   BiliFocusableSurface(
     scaleOnFocus = false,
-    shape = RoundedCornerShape(BiliRadius.Pill),
+    shadowOnFocus = false,
+    shape = chipShape,
     onClick = onClick,
     modifier = modifier
       .fillMaxWidth()
       .height(BiliSizing.SettingsChipHeight),
   ) {
     Box(
-      modifier = Modifier.fillMaxSize(),
+      modifier = Modifier
+        .fillMaxSize()
+        .clip(chipShape)
+        .background(
+          color = if (selected) {
+            homeColors.accent.copy(alpha = BiliFocus.SettingsChipSelectedBackgroundAlpha)
+          } else {
+            Color.Transparent
+          },
+          shape = chipShape,
+        ),
       contentAlignment = Alignment.Center,
     ) {
       Text(
         text = title,
-        color = if (selected) BiliColors.BiliPink else BiliColors.TextSecondary,
+        color = if (selected) homeColors.textPrimary else homeColors.textTertiary,
         fontSize = BiliTypography.BodySmall,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
       )
@@ -712,9 +763,10 @@ private const val SettingsItemAutoReturnHomeOnCompletion = 8
 private const val SettingsItemShowClock = 10
 private const val SettingsItemAutoConfirmOnFocus = 11
 private const val SettingsItemAutoRefreshOnSwitch = 12
-private const val SettingsItemLowSpec = 14
-private const val SettingsItemClearCache = 15
-private const val SettingsItemChineseTextVariant = 16
+private const val SettingsItemVisualPerformanceMode = 14
+private const val SettingsItemHomeThemeVariant = 15
+private const val SettingsItemClearCache = 16
+private const val SettingsItemChineseTextVariant = 17
 
 private val SettingsFocusableItems = listOf(
   SettingsItemPlaybackQuality,
@@ -728,7 +780,8 @@ private val SettingsFocusableItems = listOf(
   SettingsItemShowClock,
   SettingsItemAutoConfirmOnFocus,
   SettingsItemAutoRefreshOnSwitch,
-  SettingsItemLowSpec,
+  SettingsItemVisualPerformanceMode,
+  SettingsItemHomeThemeVariant,
   SettingsItemClearCache,
   SettingsItemChineseTextVariant,
 )
@@ -742,8 +795,10 @@ private fun SettingsOptionRow(
   onFocused: () -> Unit = {},
   onClick: () -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   BiliFocusableSurface(
     scaleOnFocus = false,
+    shadowOnFocus = false,
     shape = RoundedCornerShape(BiliRadius.Panel),
     onClick = onClick,
     onFocused = onFocused,
@@ -762,20 +817,20 @@ private fun SettingsOptionRow(
       ) {
         Text(
           text = title,
-          color = BiliColors.TextPrimary,
+          color = homeColors.textPrimary,
           fontSize = BiliTypography.Body,
           fontWeight = FontWeight.Bold,
         )
         Text(
           text = description,
-          color = BiliColors.TextSecondary,
+          color = homeColors.textSecondary,
           fontSize = BiliTypography.BodySmall,
           modifier = Modifier.padding(top = BiliSpacing.Xs),
         )
       }
       Text(
         text = value,
-        color = BiliColors.BiliPink,
+        color = homeColors.accent,
         fontSize = BiliTypography.Body,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
@@ -818,8 +873,10 @@ private fun SettingsToggleRow(
   onFocused: () -> Unit = {},
   onCheckedChange: (Boolean) -> Unit,
 ) {
+  val homeColors = LocalHomeColors.current
   BiliFocusableSurface(
     scaleOnFocus = false,
+    shadowOnFocus = false,
     shape = RoundedCornerShape(BiliRadius.Panel),
     onClick = {
       if (enabled) {
@@ -842,13 +899,13 @@ private fun SettingsToggleRow(
       ) {
         Text(
           text = title,
-          color = if (enabled) BiliColors.TextPrimary else BiliColors.TextTertiary,
+          color = if (enabled) homeColors.textPrimary else homeColors.textTertiary,
           fontSize = BiliTypography.Body,
           fontWeight = FontWeight.Bold,
         )
         Text(
           text = description,
-          color = if (enabled) BiliColors.TextSecondary else BiliColors.TextTertiary,
+          color = if (enabled) homeColors.textSecondary else homeColors.textTertiary,
           fontSize = BiliTypography.BodySmall,
           modifier = Modifier.padding(top = BiliSpacing.Xs),
         )
@@ -865,9 +922,18 @@ private fun SettingsToggleRow(
             }
           },
           colors = SwitchDefaults.colors(
-            checkedTrackColor = BiliColors.BiliPink,
-            checkedThumbColor = BiliColors.TextPrimary,
-            checkedBorderColor = BiliColors.BiliPink,
+            checkedTrackColor = homeColors.accent,
+            checkedThumbColor = homeColors.textPrimary,
+            checkedBorderColor = homeColors.accent,
+            uncheckedTrackColor = homeColors.glassSurfaceStrong,
+            uncheckedThumbColor = homeColors.textSecondary,
+            uncheckedBorderColor = homeColors.glassBorder,
+            disabledCheckedTrackColor = homeColors.glassSurfaceStrong,
+            disabledCheckedThumbColor = homeColors.textTertiary,
+            disabledCheckedBorderColor = homeColors.glassBorder,
+            disabledUncheckedTrackColor = homeColors.cardSurface,
+            disabledUncheckedThumbColor = homeColors.textTertiary,
+            disabledUncheckedBorderColor = homeColors.glassBorder,
           ),
           modifier = Modifier.focusProperties {
             canFocus = false
@@ -893,6 +959,25 @@ private fun ChineseTextVariant.languageLabel(): String {
     ChineseTextVariant.Simplified -> stringResource(R.string.settings_language_simplified)
     ChineseTextVariant.HongKong -> stringResource(R.string.settings_language_hong_kong)
     ChineseTextVariant.Taiwan -> stringResource(R.string.settings_language_taiwan)
+  }
+}
+
+@Composable
+private fun AppVisualPerformanceMode.visualPerformanceLabel(): String {
+  return when (this) {
+    AppVisualPerformanceMode.Smooth -> stringResource(R.string.settings_visual_performance_smooth)
+    AppVisualPerformanceMode.Balanced -> stringResource(R.string.settings_visual_performance_balanced)
+    AppVisualPerformanceMode.Refined -> stringResource(R.string.settings_visual_performance_refined)
+  }
+}
+
+@Composable
+private fun HomeThemeVariant.homeThemeLabel(): String {
+  return when (this) {
+    HomeThemeVariant.Pink -> stringResource(R.string.settings_home_theme_pink)
+    HomeThemeVariant.Black -> stringResource(R.string.settings_home_theme_black)
+    HomeThemeVariant.Gray -> stringResource(R.string.settings_home_theme_gray)
+    HomeThemeVariant.BlueGray -> stringResource(R.string.settings_home_theme_blue_gray)
   }
 }
 

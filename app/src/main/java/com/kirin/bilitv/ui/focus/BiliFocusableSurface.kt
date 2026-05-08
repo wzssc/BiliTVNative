@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -28,12 +29,14 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
 import com.kirin.bilitv.ui.theme.BiliFocus
 import com.kirin.bilitv.ui.theme.BiliMotion
 import com.kirin.bilitv.ui.theme.BiliRadius
+import com.kirin.bilitv.ui.theme.LocalHomeColors
 
 @Composable
 fun BiliFocusableSurface(
@@ -41,6 +44,15 @@ fun BiliFocusableSurface(
   scaleOnFocus: Boolean = true,
   shadowOnFocus: Boolean = true,
   shape: Shape = RoundedCornerShape(BiliRadius.Card),
+  focusedScale: Float = BiliFocus.CardScale,
+  focusedBorderColor: Color? = null,
+  restingBorderColor: Color? = null,
+  focusedBorderWidth: Dp = BiliFocus.BorderWidth,
+  restingBorderWidth: Dp = BiliFocus.RestingBorderWidth,
+  focusedShadowColor: Color? = null,
+  focusedShadowElevation: Dp = BiliFocus.ShadowElevation,
+  focusedBackgroundColor: Color? = null,
+  restingBackgroundColor: Color? = null,
   onClick: () -> Unit = {},
   onFocused: () -> Unit = {},
   onFocusChanged: (Boolean) -> Unit = {},
@@ -48,10 +60,15 @@ fun BiliFocusableSurface(
 ) {
   var focused by remember { mutableStateOf(false) }
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val focusShadowEnabled = performancePolicy.focusShadowEnabled && shadowOnFocus
+  val targetFocusedBorderColor = focusedBorderColor ?: homeColors.accent
+  val targetRestingBorderColor = restingBorderColor ?: homeColors.glassBorder
+  val targetFocusedBackgroundColor = focusedBackgroundColor ?: homeColors.cardFocusedSurface
+  val targetRestingBackgroundColor = restingBackgroundColor ?: homeColors.cardSurface
   val scale = if (performancePolicy.motionEnabled) {
     animateFloatAsState(
-      targetValue = if (focused && scaleOnFocus) BiliFocus.CardScale else 1f,
+      targetValue = if (focused && scaleOnFocus) focusedScale else 1f,
       animationSpec = if (focused) {
         spring(
           dampingRatio = BiliMotion.FocusSpringDampingRatio,
@@ -67,17 +84,17 @@ fun BiliFocusableSurface(
   }
   val borderWidth = if (performancePolicy.motionEnabled) {
     animateDpAsState(
-      targetValue = if (focused) BiliFocus.BorderWidth else BiliFocus.RestingBorderWidth,
+      targetValue = if (focused) focusedBorderWidth else restingBorderWidth,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "focusBorderWidth",
     ).value
   } else {
-    if (focused) BiliFocus.BorderWidth else BiliFocus.RestingBorderWidth
+    if (focused) focusedBorderWidth else restingBorderWidth
   }
   val shadowElevation = if (performancePolicy.motionEnabled) {
     animateDpAsState(
       targetValue = if (focused && focusShadowEnabled) {
-        BiliFocus.ShadowElevation
+        focusedShadowElevation
       } else {
         BiliFocus.RestingShadowElevation
       },
@@ -89,28 +106,28 @@ fun BiliFocusableSurface(
   }
   val borderColor = if (performancePolicy.motionEnabled) {
     animateColorAsState(
-      targetValue = if (focused) BiliColors.BiliPink else BiliColors.Transparent,
+      targetValue = if (focused) targetFocusedBorderColor else targetRestingBorderColor,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "focusBorder",
     ).value
   } else {
-    if (focused) BiliColors.BiliPink else BiliColors.Transparent
+    if (focused) targetFocusedBorderColor else targetRestingBorderColor
   }
   val backgroundColor = if (performancePolicy.motionEnabled) {
     animateColorAsState(
-      targetValue = if (focused) BiliColors.SurfaceSelected else BiliColors.Surface,
+      targetValue = if (focused) targetFocusedBackgroundColor else targetRestingBackgroundColor,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "focusBackground",
     ).value
   } else {
     if (focused) {
-      BiliColors.SurfaceSelected
+      targetFocusedBackgroundColor
     } else {
-      BiliColors.Surface
+      targetRestingBackgroundColor
     }
   }
   val interactionSource = remember { MutableInteractionSource() }
-  val shadowColor = BiliColors.BiliPink.copy(alpha = BiliFocus.ShadowAlpha)
+  val shadowColor = focusedShadowColor ?: homeColors.accent.copy(alpha = BiliFocus.ShadowAlpha)
 
   Box(
     modifier = modifier

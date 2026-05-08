@@ -17,10 +17,11 @@ fun VideoThumbnailPrefetcher(
   videos: List<VideoSummary>,
   focusedIndex: Int,
   prefetchCount: Int = StandardVideoThumbnailPrefetchCount,
+  enabled: Boolean = true,
 ) {
   val performancePolicy = LocalBiliPerformancePolicy.current
   val effectivePrefetchCount = prefetchCount.coerceAtMost(performancePolicy.videoThumbnailPrefetchCount)
-  if (videos.isEmpty() || effectivePrefetchCount <= 0) {
+  if (!enabled || videos.isEmpty() || effectivePrefetchCount <= 0) {
     return
   }
 

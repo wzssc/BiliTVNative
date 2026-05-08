@@ -59,7 +59,6 @@ import com.kirin.bilitv.core.model.HomeSection
 import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.core.network.VideoRepository
 import com.kirin.bilitv.ui.common.FeedStatusScreen
-import com.kirin.bilitv.ui.common.VideoThumbnailPrefetcher
 import com.kirin.bilitv.ui.common.VideoGridSkeleton
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
@@ -69,6 +68,7 @@ import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
+import com.kirin.bilitv.ui.theme.LocalHomeColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -329,9 +329,9 @@ internal fun RecommendScreen(
             onRestoreFocusHandled = onRestoreFocusHandled,
             requestInitialFocus = requestInitialFocus,
             onInitialFocusRequested = onInitialFocusRequested,
-            onFocusedIndexChange = { index ->
+            onFocusedIndexChange = { index, video ->
               uiState.focusedVideoIndex = index
-              uiState.focusedVideoKey = currentState.videos.getOrNull(index)?.focusRestoreKey().orEmpty()
+              uiState.focusedVideoKey = video.focusRestoreKey()
             },
             onLoadMore = ::loadNextPage,
             onMoveLeftToNav = onMoveLeftToNav,
@@ -400,12 +400,13 @@ private fun HomeSectionTab(
 ) {
   var focused by remember { mutableStateOf(false) }
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val shape = RoundedCornerShape(BiliRadius.Pill)
-  val targetBorderColor = if (focused) BiliColors.BiliPink else BiliColors.Transparent
+  val targetBorderColor = if (focused) homeColors.accent else BiliColors.Transparent
   val targetTextColor = when {
-    selected -> BiliColors.BiliPink
-    focused -> BiliColors.TextPrimary
-    else -> BiliColors.TextSecondary
+    selected -> homeColors.accent
+    focused -> homeColors.textPrimary
+    else -> homeColors.textSecondary
   }
   val borderWidth = if (performancePolicy.motionEnabled) {
     animateDpAsState(
@@ -494,7 +495,7 @@ private fun RecommendGrid(
   onRestoreFocusHandled: (Int) -> Unit,
   requestInitialFocus: Boolean,
   onInitialFocusRequested: () -> Unit,
-  onFocusedIndexChange: (Int) -> Unit,
+  onFocusedIndexChange: (Int, VideoSummary) -> Unit,
   onLoadMore: () -> Unit,
   onMoveLeftToNav: () -> Boolean,
   onVideoSelected: (VideoSummary) -> Unit,
@@ -507,7 +508,7 @@ private fun RecommendGrid(
     onRestoreFocusHandled = onRestoreFocusHandled,
     requestInitialFocus = requestInitialFocus,
     onInitialFocusRequested = onInitialFocusRequested,
-    onFocusedIndexChange = { index, _ -> onFocusedIndexChange(index) },
+    onFocusedIndexChange = onFocusedIndexChange,
     onLoadMore = onLoadMore,
     onMoveLeftToNav = onMoveLeftToNav,
     onMoveUpFromFirstRow = {

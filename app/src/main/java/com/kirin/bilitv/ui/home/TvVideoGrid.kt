@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,6 +42,7 @@ import com.kirin.bilitv.ui.theme.BiliFocus
 import com.kirin.bilitv.ui.theme.BiliMotion
 import com.kirin.bilitv.ui.theme.BiliSizing
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -49,13 +51,9 @@ private const val TvGridRestoreFocusRetryCount = 8
 
 private val TvGridBringIntoViewSpec = object : BringIntoViewSpec {
   override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-    val childEnd = offset + size
-    return when {
-      offset < 0f && childEnd > containerSize -> 0f
-      offset < 0f -> offset
-      childEnd > containerSize -> childEnd - containerSize
-      else -> 0f
-    }
+    // D-pad row scrolling is handled below. Returning 0 prevents Compose's
+    // default focus relocation from doing an instant pre-scroll first.
+    return 0f
   }
 }
 
@@ -82,7 +80,13 @@ internal fun TvVideoGrid(
 ) {
   val columns = BiliSizing.VideoGridColumns
   val rowCount = (videos.size + columns - 1) / columns
-  val listState = rememberLazyListState()
+  val restoreTargetIndex = restoredFocusIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
+  val restoreTargetRow = if (videos.isEmpty()) {
+    0
+  } else {
+    restoreTargetIndex / columns
+  }
+  val listState = rememberLazyListState(initialFirstVisibleItemIndex = restoreTargetRow)
   val coroutineScope = rememberCoroutineScope()
   val performancePolicy = LocalBiliPerformancePolicy.current
   val density = LocalDensity.current
@@ -90,7 +94,6 @@ internal fun TvVideoGrid(
   val focusedRowTopPaddingPx = with(density) { BiliFocus.FocusedRowTopPadding.roundToPx() }
   val videoCardFallbackHeightPx = with(density) { BiliSizing.VideoCardMinHeight.roundToPx() }
   val restoredItemFocusRequester = remember { FocusRequester() }
-  val restoreTargetIndex = restoredFocusIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
   val itemFocusRequesters = remember(videos.size, firstItemFocusRequester, restoredItemFocusRequester, restoreTargetIndex) {
     List(videos.size) { index ->
       when (index) {
@@ -102,11 +105,13 @@ internal fun TvVideoGrid(
   }
   var focusScrollJob by remember { mutableStateOf<Job?>(null) }
   var focusedIndex by remember { mutableIntStateOf(-1) }
-  var pendingVerticalFocusRow by remember { mutableIntStateOf(-1) }
+  var rowScrollActive by remember { mutableStateOf(false) }
+  var rowScrollGeneration by remember { mutableIntStateOf(0) }
 
   VideoThumbnailPrefetcher(
     videos = videos,
     focusedIndex = if (focusedIndex >= 0) focusedIndex else restoredFocusIndex,
+    enabled = !rowScrollActive,
   )
 
   suspend fun scrollRow(row: Int, smoothScroll: Boolean) {
@@ -156,11 +161,37 @@ internal fun TvVideoGrid(
     }.isSuccess
   }
 
-  fun scrollRowIfNeeded(row: Int) {
+  fun commitFocusedItem(index: Int) {
+    videos.getOrNull(index)?.let { video ->
+      onFocusedIndexChange(index, video)
+    }
+  }
+
+  fun scrollThenFocusItem(index: Int, row: Int) {
     focusScrollJob?.cancel()
+    val scrollGeneration = ++rowScrollGeneration
+    rowScrollActive = true
     focusScrollJob = coroutineScope.launch {
-      withFrameNanos { }
-      scrollRow(row, smoothScroll = performancePolicy.smoothScrollingEnabled)
+      val smoothScroll = performancePolicy.smoothScrollingEnabled
+      try {
+        if (smoothScroll) {
+          val scrollJob = launch {
+            scrollRow(row, smoothScroll = true)
+          }
+          delay(BiliMotion.FocusScrollDelayMs)
+          focusItem(index)
+          scrollJob.join()
+          delay(BiliMotion.FocusScrollSettleMs)
+        } else {
+          scrollRow(row, smoothScroll = false)
+          withFrameNanos { }
+          focusItem(index)
+        }
+      } finally {
+        if (rowScrollGeneration == scrollGeneration) {
+          rowScrollActive = false
+        }
+      }
     }
   }
 
@@ -171,9 +202,11 @@ internal fun TvVideoGrid(
     val lastRow = lastIndex / columns
 
     if (direction == Key.DirectionUp && currentRow == 0) {
+      commitFocusedItem(fromIndex)
       return onMoveUpFromFirstRow()
     }
     if (direction == Key.DirectionLeft && currentColumn == 0) {
+      commitFocusedItem(fromIndex)
       return onMoveLeftToNav()
     }
 
@@ -189,8 +222,8 @@ internal fun TvVideoGrid(
       return focusItem(targetIndex)
     }
 
-    pendingVerticalFocusRow = targetIndex / columns
-    return focusItem(targetIndex)
+    scrollThenFocusItem(targetIndex, targetIndex / columns)
+    return true
   }
 
   CompositionLocalProvider(LocalBringIntoViewSpec provides TvGridBringIntoViewSpec) {
@@ -224,6 +257,7 @@ internal fun TvVideoGrid(
               VideoCard(
                 video = video,
                 mode = cardMode,
+                interactionPaused = rowScrollActive,
                 modifier = Modifier
                   .weight(1f)
                   .focusRequester(itemFocusRequesters[index])
@@ -239,13 +273,10 @@ internal fun TvVideoGrid(
                       Key.DirectionRight -> moveFocus(index, event.key)
                       else -> false
                     }
-                  },
+                },
                 onFocused = {
-                  val focusChanged = focusedIndex != index
-                  val pendingRow = pendingVerticalFocusRow
-                  pendingVerticalFocusRow = -1
                   focusedIndex = index
-                  onFocusedIndexChange(index, video)
+                  commitFocusedItem(index)
                   if (index.shouldLoadMore(
                       totalItems = videos.size,
                       threshold = performancePolicy.loadMoreFocusThreshold,
@@ -253,12 +284,9 @@ internal fun TvVideoGrid(
                   ) {
                     onLoadMore()
                   }
-                  if (focusChanged && pendingRow == row) {
-                    scrollRowIfNeeded(row)
-                  }
                 },
                 onClick = {
-                  onFocusedIndexChange(index, video)
+                  commitFocusedItem(index)
                   onVideoSelected(video)
                 },
               )
@@ -301,7 +329,13 @@ private suspend fun LazyListState.scrollRowIntoStablePosition(
       return
     }
     if (smoothScroll) {
-      animateScrollBy(scrollDelta.toFloat())
+      animateScrollBy(
+        value = scrollDelta.toFloat(),
+        animationSpec = tween(
+          durationMillis = BiliMotion.FocusScrollMs,
+          easing = BiliMotion.FocusScrollEasing,
+        ),
+      )
     } else {
       scroll {
         scrollBy(scrollDelta.toFloat())

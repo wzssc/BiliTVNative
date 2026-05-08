@@ -8,10 +8,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -27,14 +28,14 @@ import com.kirin.bilitv.core.player.DanmakuEntry
 import com.kirin.bilitv.core.player.DanmakuSettings
 import com.kirin.bilitv.core.player.DanmakuMode
 import com.kirin.bilitv.ui.i18n.LocalChineseTextConverter
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
 internal fun PlayerDanmakuLayer(
   entries: List<DanmakuEntry>,
   settings: DanmakuSettings,
-  positionMs: Long,
+  positionState: State<Long>,
+  syncToken: Long,
   isPlaying: Boolean,
   playbackSpeed: Float,
   lowSpecMode: Boolean,
@@ -58,10 +59,21 @@ internal fun PlayerDanmakuLayer(
       )
     }
     var danmakuView by remember { mutableStateOf<DanmakuView?>(null) }
-    var lastTimelinePositionMs by remember(entries) { mutableLongStateOf(positionMs) }
+    val latestIsPlaying by rememberUpdatedState(isPlaying)
+    val configKey = remember(settings, fontSizePx, viewportHeightPx, playbackSpeed, lowSpecMode) {
+      DanmakuConfigKey(
+        settings = settings,
+        fontSizePx = fontSizePx,
+        viewportHeightPx = viewportHeightPx,
+        playbackSpeed = playbackSpeed,
+        lowSpecMode = lowSpecMode,
+      )
+    }
+    val lastAppliedConfigKey = remember { arrayOfNulls<DanmakuConfigKey>(1) }
 
     AndroidView(
       factory = { context ->
+        lastAppliedConfigKey[0] = null
         DanmakuView(context).apply {
           isFocusable = false
           isFocusableInTouchMode = false
@@ -74,47 +86,43 @@ internal fun PlayerDanmakuLayer(
       },
       update = { view ->
         danmakuView = view
-        view.applyDanmakuConfig(
-          settings = settings,
-          fontSizePx = fontSizePx,
-          viewportHeightPx = viewportHeightPx,
-          playbackSpeed = playbackSpeed,
-          lowSpecMode = lowSpecMode,
-        )
+        if (lastAppliedConfigKey[0] != configKey) {
+          view.applyDanmakuConfig(configKey)
+          lastAppliedConfigKey[0] = configKey
+        }
       },
       modifier = Modifier.fillMaxSize(),
     )
 
     LaunchedEffect(danmakuView, danmakuData) {
       val view = danmakuView ?: return@LaunchedEffect
+      val currentPositionMs = positionState.value
       view.controller.stop()
       view.controller.setData(danmakuData)
-      lastTimelinePositionMs = positionMs
-      if (isPlaying && danmakuData.isNotEmpty()) {
-        view.controller.start(positionMs)
+      if (latestIsPlaying && danmakuData.isNotEmpty()) {
+        view.controller.start(currentPositionMs)
       }
     }
 
     LaunchedEffect(danmakuView, isPlaying, danmakuData) {
       val view = danmakuView ?: return@LaunchedEffect
       if (isPlaying && danmakuData.isNotEmpty()) {
-        view.controller.start(positionMs)
+        val currentPositionMs = positionState.value
+        view.controller.start(currentPositionMs)
       } else {
         view.controller.pause()
       }
     }
 
-    LaunchedEffect(danmakuView, positionMs, isPlaying) {
+    LaunchedEffect(danmakuView, syncToken, danmakuData) {
       val view = danmakuView ?: return@LaunchedEffect
-      val positionJumped = positionMs < lastTimelinePositionMs ||
-        abs(positionMs - lastTimelinePositionMs) > DanmakuSeekJumpThresholdMs
-      lastTimelinePositionMs = positionMs
-      if (positionJumped) {
-        view.controller.clear()
-        if (isPlaying && danmakuData.isNotEmpty()) {
-          view.controller.pause()
-          view.controller.start(positionMs)
-        }
+      if (syncToken <= 0L) {
+        return@LaunchedEffect
+      }
+      view.controller.clear()
+      if (latestIsPlaying && danmakuData.isNotEmpty()) {
+        view.controller.pause()
+        view.controller.start(positionState.value)
       }
     }
 
@@ -125,6 +133,14 @@ internal fun PlayerDanmakuLayer(
     }
   }
 }
+
+private data class DanmakuConfigKey(
+  val settings: DanmakuSettings,
+  val fontSizePx: Float,
+  val viewportHeightPx: Float,
+  val playbackSpeed: Float,
+  val lowSpecMode: Boolean,
+)
 
 private fun List<DanmakuEntry>.toTextData(
   settings: DanmakuSettings,
@@ -156,13 +172,12 @@ private fun List<DanmakuEntry>.toTextData(
     .toList()
 }
 
-private fun DanmakuView.applyDanmakuConfig(
-  settings: DanmakuSettings,
-  fontSizePx: Float,
-  viewportHeightPx: Float,
-  playbackSpeed: Float,
-  lowSpecMode: Boolean,
-) {
+private fun DanmakuView.applyDanmakuConfig(config: DanmakuConfigKey) {
+  val settings = config.settings
+  val fontSizePx = config.fontSizePx
+  val viewportHeightPx = config.viewportHeightPx
+  val playbackSpeed = config.playbackSpeed
+  val lowSpecMode = config.lowSpecMode
   val lineHeightPx = (fontSizePx * 1.35f).coerceAtLeast(32f)
   val lineMarginPx = (fontSizePx * 0.32f).coerceAtLeast(6f)
   val availableHeightPx = (viewportHeightPx * settings.area.coerceIn(0.25f, 1f)).coerceAtLeast(lineHeightPx)
@@ -213,6 +228,5 @@ private val DanmakuMode.layerType: Int
     DanmakuMode.Bottom -> LAYER_TYPE_BOTTOM_CENTER
   }
 
-private const val DanmakuSeekJumpThresholdMs = 3_000L
 private const val StandardMaxDanmakuEntries = 5000
 private const val LowSpecMaxDanmakuEntries = 2500

@@ -5,8 +5,34 @@ import com.kirin.bilitv.core.model.HomeSection
 import com.kirin.bilitv.core.player.PlaybackCodecPreference
 import com.kirin.bilitv.core.player.PlaybackQualityPreference
 
+enum class AppVisualPerformanceMode(val key: String) {
+  Smooth("smooth"),
+  Balanced("balanced"),
+  Refined("refined");
+
+  companion object {
+    fun fromKey(key: String?): AppVisualPerformanceMode {
+      return entries.firstOrNull { mode -> mode.key == key } ?: Balanced
+    }
+  }
+}
+
+enum class HomeThemeVariant(val key: String) {
+  Pink("pink"),
+  Black("black"),
+  Gray("gray"),
+  BlueGray("blue_gray");
+
+  companion object {
+    fun fromKey(key: String?): HomeThemeVariant {
+      return entries.firstOrNull { theme -> theme.key == key } ?: Pink
+    }
+  }
+}
+
 data class AppSettings(
-  val lowSpecMode: Boolean = false,
+  val visualPerformanceMode: AppVisualPerformanceMode = AppVisualPerformanceMode.Balanced,
+  val homeThemeVariant: HomeThemeVariant = HomeThemeVariant.Pink,
   val chineseTextVariant: ChineseTextVariant = ChineseTextVariant.Simplified,
   val playbackQualityPreference: PlaybackQualityPreference = PlaybackQualityPreference.Highest,
   val playbackCodecPreference: PlaybackCodecPreference = PlaybackCodecPreference.Auto,
@@ -20,10 +46,14 @@ data class AppSettings(
   val autoConfirmOnFocus: Boolean = false,
   val autoRefreshOnSwitch: Boolean = false,
   val enabledHomeSections: Set<HomeSection> = HomeSection.DefaultOrder.toSet(),
-)
+) {
+  val lowSpecMode: Boolean
+    get() = visualPerformanceMode == AppVisualPerformanceMode.Smooth
+}
 
 data class AppPerformancePolicy(
   val lowSpecMode: Boolean,
+  val visualPerformanceMode: AppVisualPerformanceMode,
   val motionEnabled: Boolean,
   val smoothScrollingEnabled: Boolean,
   val videoThumbnailWidthPx: Int,
@@ -36,26 +66,51 @@ data class AppPerformancePolicy(
   val focusShadowEnabled: Boolean,
   val loadMoreFocusThreshold: Int,
   val focusedCoverBlurEnabled: Boolean,
+  val refinedVisualEffectsEnabled: Boolean,
+  val cinematicVisualEffectsEnabled: Boolean,
 ) {
   companion object {
-    val Standard = AppPerformancePolicy(
+    val Balanced = AppPerformancePolicy(
       lowSpecMode = false,
+      visualPerformanceMode = AppVisualPerformanceMode.Balanced,
       motionEnabled = true,
       smoothScrollingEnabled = true,
-      videoThumbnailWidthPx = 480,
-      videoThumbnailHeightPx = 270,
+      videoThumbnailWidthPx = 640,
+      videoThumbnailHeightPx = 360,
       videoThumbnailRgb565Enabled = false,
-      ownerAvatarSizePx = 72,
+      ownerAvatarSizePx = 96,
       ownerAvatarRgb565Enabled = false,
       imageMemoryCacheEnabled = true,
-      videoThumbnailPrefetchCount = 16,
+      videoThumbnailPrefetchCount = 24,
       focusShadowEnabled = true,
-      loadMoreFocusThreshold = 16,
+      loadMoreFocusThreshold = 18,
+      focusedCoverBlurEnabled = false,
+      refinedVisualEffectsEnabled = true,
+      cinematicVisualEffectsEnabled = false,
+    )
+
+    val Refined = AppPerformancePolicy(
+      lowSpecMode = false,
+      visualPerformanceMode = AppVisualPerformanceMode.Refined,
+      motionEnabled = true,
+      smoothScrollingEnabled = true,
+      videoThumbnailWidthPx = 640,
+      videoThumbnailHeightPx = 360,
+      videoThumbnailRgb565Enabled = false,
+      ownerAvatarSizePx = 96,
+      ownerAvatarRgb565Enabled = false,
+      imageMemoryCacheEnabled = true,
+      videoThumbnailPrefetchCount = 24,
+      focusShadowEnabled = true,
+      loadMoreFocusThreshold = 18,
       focusedCoverBlurEnabled = true,
+      refinedVisualEffectsEnabled = true,
+      cinematicVisualEffectsEnabled = true,
     )
 
     val LowSpec = AppPerformancePolicy(
       lowSpecMode = true,
+      visualPerformanceMode = AppVisualPerformanceMode.Smooth,
       motionEnabled = false,
       smoothScrollingEnabled = false,
       videoThumbnailWidthPx = 320,
@@ -68,10 +123,45 @@ data class AppPerformancePolicy(
       focusShadowEnabled = false,
       loadMoreFocusThreshold = 6,
       focusedCoverBlurEnabled = false,
+      refinedVisualEffectsEnabled = false,
+      cinematicVisualEffectsEnabled = false,
     )
 
-    fun fromSettings(settings: AppSettings): AppPerformancePolicy {
-      return if (settings.lowSpecMode) LowSpec else Standard
+    private val ConstrainedTv = Balanced.copy(
+      videoThumbnailWidthPx = 480,
+      videoThumbnailHeightPx = 270,
+      videoThumbnailRgb565Enabled = true,
+      ownerAvatarSizePx = 72,
+      ownerAvatarRgb565Enabled = true,
+      videoThumbnailPrefetchCount = 8,
+      focusShadowEnabled = false,
+      loadMoreFocusThreshold = 8,
+      focusedCoverBlurEnabled = false,
+      refinedVisualEffectsEnabled = false,
+      cinematicVisualEffectsEnabled = false,
+    )
+
+    val Standard = Balanced
+
+    fun fromSettings(
+      settings: AppSettings,
+      constrainedTvUi: Boolean = false,
+    ): AppPerformancePolicy {
+      if (settings.visualPerformanceMode == AppVisualPerformanceMode.Smooth) {
+        return LowSpec
+      }
+      if (constrainedTvUi) {
+        return when (settings.visualPerformanceMode) {
+          AppVisualPerformanceMode.Smooth -> LowSpec
+          AppVisualPerformanceMode.Balanced -> ConstrainedTv.copy(visualPerformanceMode = AppVisualPerformanceMode.Balanced)
+          AppVisualPerformanceMode.Refined -> Refined
+        }
+      }
+      return when (settings.visualPerformanceMode) {
+        AppVisualPerformanceMode.Smooth -> LowSpec
+        AppVisualPerformanceMode.Balanced -> Balanced
+        AppVisualPerformanceMode.Refined -> Refined
+      }
     }
   }
 }

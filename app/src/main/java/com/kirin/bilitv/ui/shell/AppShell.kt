@@ -3,11 +3,17 @@ package com.kirin.bilitv.ui.shell
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +50,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -96,17 +104,46 @@ import com.kirin.bilitv.ui.search.SearchScreen
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.settings.SettingsScreen
 import com.kirin.bilitv.ui.theme.BiliColors
+import com.kirin.bilitv.ui.theme.BiliFocus
+import com.kirin.bilitv.ui.theme.BiliMotion
 import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
+import com.kirin.bilitv.ui.theme.HomeColorScheme
+import com.kirin.bilitv.ui.theme.HomeThemes
+import com.kirin.bilitv.ui.theme.LocalHomeColors
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 private const val PlaybackFocusRestoreRetryCount = 8
 private const val PlaybackFocusRestoreCleanupFrameCount = 30
 private const val ExitConfirmWindowMs = 3_000L
+
+private fun isConstrainedTvUiDevice(): Boolean {
+  val buildValues = listOf(
+    Build.HARDWARE,
+    Build.BOARD,
+    Build.DEVICE,
+    Build.PRODUCT,
+    Build.MODEL,
+    Build.MANUFACTURER,
+    buildStringField("SOC_MODEL"),
+    buildStringField("SOC_MANUFACTURER"),
+  )
+  val normalizedValues = buildValues.map { value -> value.orEmpty().lowercase(Locale.ROOT) }
+  return normalizedValues.any { value -> value.contains("mt9655") } ||
+    (normalizedValues.any { value -> value.contains("xiaomi") } &&
+      normalizedValues.any { value -> value.contains("mitv-mffu1") })
+}
+
+private fun buildStringField(name: String): String {
+  return runCatching {
+    Build::class.java.getField(name).get(null) as? String
+  }.getOrDefault("").orEmpty()
+}
 
 @Composable
 fun BiliTvApp(
@@ -133,8 +170,15 @@ fun BiliTvApp(
   val codecCapability = remember(codecCapabilityProbe) { codecCapabilityProbe.probe() }
   val autoConfirmOnFocus = settings.autoConfirmOnFocus
   val autoRefreshOnSwitch = settings.autoConfirmOnFocus && settings.autoRefreshOnSwitch
-  val performancePolicy = remember(settings.lowSpecMode) {
-    AppPerformancePolicy.fromSettings(settings)
+  val constrainedTvUiDevice = remember { isConstrainedTvUiDevice() }
+  val performancePolicy = remember(settings.visualPerformanceMode, constrainedTvUiDevice) {
+    AppPerformancePolicy.fromSettings(
+      settings = settings,
+      constrainedTvUi = constrainedTvUiDevice,
+    )
+  }
+  val homeColors = remember(settings.homeThemeVariant) {
+    HomeThemes.fromVariant(settings.homeThemeVariant)
   }
   val effectivePlaybackCodecPreference = if (settings.lowSpecMode) {
     PlaybackCodecPreference.H264
@@ -328,9 +372,27 @@ fun BiliTvApp(
     LocalContext provides localizedContext,
     LocalBiliPerformancePolicy provides performancePolicy,
     LocalChineseTextConverter provides textConverter,
+    LocalHomeColors provides homeColors,
   ) {
     val activePlaybackRequest = playbackRequest
-    LaunchedEffect(pendingContentFocusDestination, selectedDestination, accountSelected) {
+    var visiblePlaybackRequest by remember { mutableStateOf<PlaybackRequest?>(null) }
+    var transitionScrimVisible by remember { mutableStateOf(false) }
+    val transitionScrimAlpha by animateFloatAsState(
+      targetValue = if (transitionScrimVisible) 1f else 0f,
+      animationSpec = tween(
+        durationMillis = if (transitionScrimVisible) {
+          BiliMotion.PlaybackTransitionScrimInMs
+        } else {
+          BiliMotion.PlaybackTransitionScrimOutMs
+        },
+        easing = BiliMotion.FocusEasing,
+      ),
+      label = "playbackTransitionScrim",
+    )
+    LaunchedEffect(activePlaybackRequest, pendingContentFocusDestination, selectedDestination, accountSelected) {
+      if (activePlaybackRequest != null) {
+        return@LaunchedEffect
+      }
       val destination = pendingContentFocusDestination ?: return@LaunchedEffect
       if (accountSelected || selectedDestination != destination) {
         return@LaunchedEffect
@@ -357,271 +419,313 @@ fun BiliTvApp(
       }
     }
 
+    LaunchedEffect(activePlaybackRequest) {
+      if (activePlaybackRequest == visiblePlaybackRequest) {
+        transitionScrimVisible = false
+        return@LaunchedEffect
+      }
+      transitionScrimVisible = true
+      delay(BiliMotion.PlaybackTransitionScrimInMs.toLong())
+      visiblePlaybackRequest = activePlaybackRequest
+      delay(BiliMotion.PlaybackTransitionScrimHoldMs.toLong())
+      if (playbackRequest == activePlaybackRequest) {
+        transitionScrimVisible = false
+      }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-      BackHandler(enabled = activePlaybackRequest == null) {
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastAppExitBackPressMs <= ExitConfirmWindowMs) {
-          cancelAppExitConfirmToast()
-          context.findActivity()?.finish()
-        } else {
-          lastAppExitBackPressMs = now
-          showAppExitConfirmToast()
+      if (visiblePlaybackRequest == null) {
+        Box(modifier = Modifier.fillMaxSize()) {
+        HomeAppBackground(
+          colors = homeColors,
+          refinedVisualsEnabled = performancePolicy.refinedVisualEffectsEnabled,
+          cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled,
+        )
+        BackHandler(enabled = activePlaybackRequest == null) {
+          val now = SystemClock.elapsedRealtime()
+          if (now - lastAppExitBackPressMs <= ExitConfirmWindowMs) {
+            cancelAppExitConfirmToast()
+            context.findActivity()?.finish()
+          } else {
+            lastAppExitBackPressMs = now
+            showAppExitConfirmToast()
+          }
+        }
+        Row(
+          modifier = Modifier.fillMaxSize(),
+        ) {
+          AppSidebar(
+            selectedDestination = selectedDestination,
+            accountSelected = accountSelected,
+            userSession = userSession,
+            autoConfirmOnFocus = autoConfirmOnFocus,
+            accountFocusRequester = accountFocusRequester,
+            navFocusRequesters = navFocusRequesters,
+            onAccountSelected = {
+              accountSelected = true
+            },
+            onDestinationSelected = { destination ->
+              selectDestination(destination)
+            },
+            shouldAutoConfirmDestination = { destination ->
+              autoConfirmOnFocus || destination.name !in visitedDestinationNames
+            },
+            onMoveRight = { destination ->
+              moveIntoDestination(destination)
+            },
+          )
+          Box(
+            modifier = Modifier
+              .fillMaxSize()
+              .then(
+                if (!accountSelected && selectedDestination == AppDestination.Search) {
+                  Modifier
+                } else {
+                  Modifier.padding(BiliSizing.ContentPadding)
+                },
+              ),
+          ) {
+            if (accountSelected) {
+              AccountScreen(
+                userSession = userSession,
+                authRepository = authRepository,
+              )
+            } else {
+              when (selectedDestination) {
+                AppDestination.Recommend -> RecommendScreen(
+                  videoRepository = videoRepository,
+                  uiState = recommendUiState,
+                  firstItemFocusRequester = contentFocusRequester,
+                  enabledHomeSections = settings.enabledHomeSections,
+                  autoConfirmOnFocus = autoConfirmOnFocus,
+                  autoRefreshOnSwitch = autoRefreshOnSwitch,
+                  manualRefreshKey = recommendManualRefreshKey,
+                  restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Recommend),
+                  onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Recommend, key) },
+                  requestInitialFocus = initialHomeFocusPending,
+                  onInitialFocusRequested = {
+                    initialHomeFocusPending = false
+                  },
+                  onMoveLeftToNav = {
+                    runCatching {
+                      if (accountSelected) {
+                        accountFocusRequester.requestFocus()
+                      } else {
+                        navFocusRequesters.getValue(selectedDestination).requestFocus()
+                      }
+                    }.isSuccess
+                  },
+                  onVideoSelected = { video ->
+                    playbackRequest = video.toPlaybackRequest()
+                  },
+                )
+                AppDestination.Search -> SearchScreen(
+                  videoRepository = videoRepository,
+                  searchHistoryStore = searchHistoryStore,
+                  firstItemFocusRequester = searchFocusRequester,
+                  restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Search),
+                  onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Search, key) },
+                  onMoveLeftToNav = {
+                    runCatching {
+                      if (accountSelected) {
+                        accountFocusRequester.requestFocus()
+                      } else {
+                        navFocusRequesters.getValue(selectedDestination).requestFocus()
+                      }
+                    }.isSuccess
+                  },
+                  onVideoSelected = { video ->
+                    playbackRequest = video.toPlaybackRequest()
+                  },
+                )
+                AppDestination.History -> HistoryFeedScreen(
+                  videoRepository = videoRepository,
+                  isLoggedIn = userSession.isLoggedIn,
+                  feedState = historyFeedState,
+                  autoRefreshOnSwitch = autoRefreshOnSwitch,
+                  manualRefreshKey = historyManualRefreshKey,
+                  firstItemFocusRequester = historyFocusRequester,
+                  restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.History),
+                  onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.History, key) },
+                  onMoveLeftToNav = {
+                    runCatching {
+                      navFocusRequesters.getValue(selectedDestination).requestFocus()
+                    }.isSuccess
+                  },
+                  onVideoSelected = { video ->
+                    playbackRequest = video.toPlaybackRequest(forceStartPosition = true)
+                  },
+                )
+                AppDestination.Dynamic -> DynamicFeedScreen(
+                  videoRepository = videoRepository,
+                  isLoggedIn = userSession.isLoggedIn,
+                  feedState = dynamicFeedState,
+                  autoRefreshOnSwitch = autoRefreshOnSwitch,
+                  manualRefreshKey = dynamicManualRefreshKey,
+                  firstItemFocusRequester = dynamicFocusRequester,
+                  restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Dynamic),
+                  onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Dynamic, key) },
+                  onMoveLeftToNav = {
+                    runCatching {
+                      navFocusRequesters.getValue(selectedDestination).requestFocus()
+                    }.isSuccess
+                  },
+                  onVideoSelected = { video ->
+                    playbackRequest = video.toPlaybackRequest()
+                  },
+                )
+                AppDestination.Settings -> SettingsScreen(
+                  settings = settings,
+                  cacheSizeText = cacheSizeBytes?.let(::formatCacheSize) ?: stringResource(R.string.settings_clear_cache_calculating),
+                  codecCapability = codecCapability,
+                  firstItemFocusRequester = settingsFocusRequester,
+                  onMoveLeftToNav = {
+                    runCatching {
+                      if (accountSelected) {
+                        accountFocusRequester.requestFocus()
+                      } else {
+                        navFocusRequesters.getValue(selectedDestination).requestFocus()
+                      }
+                    }.isSuccess
+                  },
+                  onVisualPerformanceModeChange = { mode ->
+                    coroutineScope.launch {
+                      appSettingsStore.setVisualPerformanceMode(mode)
+                    }
+                  },
+                  onHomeThemeVariantChange = { variant ->
+                    coroutineScope.launch {
+                      appSettingsStore.setHomeThemeVariant(variant)
+                    }
+                  },
+                  onChineseTextVariantChange = { variant ->
+                    coroutineScope.launch {
+                      appSettingsStore.setChineseTextVariant(variant)
+                    }
+                  },
+                  onClearCache = {
+                    coroutineScope.launch {
+                      val result = appCacheManager.clearCache()
+                      cacheSizeBytes = appCacheManager.cacheSizeBytes()
+                      Toast.makeText(
+                        localizedContext,
+                        localizedContext.getString(R.string.settings_clear_cache_done, formatCacheSize(result.clearedBytes)),
+                        Toast.LENGTH_SHORT,
+                      ).show()
+                    }
+                  },
+                  onSeekPreviewSpritesEnabledChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setSeekPreviewSpritesEnabled(enabled)
+                    }
+                  },
+                  onPlaybackQualityPreferenceChange = { preference ->
+                    coroutineScope.launch {
+                      appSettingsStore.setPlaybackQualityPreference(preference)
+                    }
+                  },
+                  onPlaybackCodecPreferenceChange = { preference ->
+                    coroutineScope.launch {
+                      appSettingsStore.setPlaybackCodecPreference(preference)
+                    }
+                  },
+                  onAirJumpAssistantEnabledChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAirJumpAssistantEnabled(enabled)
+                    }
+                  },
+                  onConfirmPlaybackExitChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setConfirmPlaybackExit(enabled)
+                    }
+                  },
+                  onAutoPlayNextEpisodeChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAutoPlayNextEpisode(enabled)
+                    }
+                  },
+                  onAutoPlayRelatedVideoChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAutoPlayRelatedVideo(enabled)
+                    }
+                  },
+                  onAutoReturnHomeOnCompletionChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAutoReturnHomeOnCompletion(enabled)
+                    }
+                  },
+                  onShowClockChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setShowClock(enabled)
+                    }
+                  },
+                  onAutoConfirmOnFocusChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAutoConfirmOnFocus(enabled)
+                    }
+                  },
+                  onAutoRefreshOnSwitchChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setAutoRefreshOnSwitch(enabled)
+                    }
+                  },
+                  onHomeSectionEnabledChange = { section, enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setHomeSectionEnabled(section, enabled)
+                    }
+                  },
+                )
+              }
+            }
+          }
+        }
+        if (settings.showClock) {
+          ClockOverlay(
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .padding(
+                top = BiliSizing.ClockOverlayTopPadding,
+                end = BiliSizing.ClockOverlayEndPadding,
+            ),
+          )
         }
       }
-      Row(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(BiliColors.Background),
-      ) {
-        AppSidebar(
-          selectedDestination = selectedDestination,
-          accountSelected = accountSelected,
-          userSession = userSession,
-          autoConfirmOnFocus = autoConfirmOnFocus,
-          accountFocusRequester = accountFocusRequester,
-          navFocusRequesters = navFocusRequesters,
-          onAccountSelected = {
-            accountSelected = true
-          },
-          onDestinationSelected = { destination ->
-            selectDestination(destination)
-          },
-          shouldAutoConfirmDestination = { destination ->
-            autoConfirmOnFocus || destination.name !in visitedDestinationNames
-          },
-          onMoveRight = { destination ->
-            moveIntoDestination(destination)
-          },
-        )
+      }
+      val displayedPlaybackRequest = visiblePlaybackRequest
+      if (displayedPlaybackRequest != null) {
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .then(
-              if (!accountSelected && selectedDestination == AppDestination.Search) {
-                Modifier
-              } else {
-                Modifier.padding(BiliSizing.ContentPadding)
-              },
-            ),
+            .background(BiliColors.VideoBlack),
         ) {
-          if (accountSelected) {
-            AccountScreen(
-              userSession = userSession,
-              authRepository = authRepository,
-            )
-          } else when (selectedDestination) {
-            AppDestination.Recommend -> RecommendScreen(
-              videoRepository = videoRepository,
-              uiState = recommendUiState,
-              firstItemFocusRequester = contentFocusRequester,
-              enabledHomeSections = settings.enabledHomeSections,
-              autoConfirmOnFocus = autoConfirmOnFocus,
-              autoRefreshOnSwitch = autoRefreshOnSwitch,
-              manualRefreshKey = recommendManualRefreshKey,
-              restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Recommend),
-              onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Recommend, key) },
-              requestInitialFocus = initialHomeFocusPending,
-              onInitialFocusRequested = {
-                initialHomeFocusPending = false
-              },
-              onMoveLeftToNav = {
-                runCatching {
-                  if (accountSelected) {
-                    accountFocusRequester.requestFocus()
-                  } else {
-                    navFocusRequesters.getValue(selectedDestination).requestFocus()
-                  }
-                }.isSuccess
-              },
-              onVideoSelected = { video ->
-                playbackRequest = video.toPlaybackRequest()
-              },
-            )
-            AppDestination.Search -> SearchScreen(
-              videoRepository = videoRepository,
-              searchHistoryStore = searchHistoryStore,
-              firstItemFocusRequester = searchFocusRequester,
-              restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Search),
-              onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Search, key) },
-              onMoveLeftToNav = {
-                runCatching {
-                  if (accountSelected) {
-                    accountFocusRequester.requestFocus()
-                  } else {
-                    navFocusRequesters.getValue(selectedDestination).requestFocus()
-                  }
-                }.isSuccess
-              },
-              onVideoSelected = { video ->
-                playbackRequest = video.toPlaybackRequest()
-              },
-            )
-            AppDestination.History -> HistoryFeedScreen(
-              videoRepository = videoRepository,
-              isLoggedIn = userSession.isLoggedIn,
-              feedState = historyFeedState,
-              autoRefreshOnSwitch = autoRefreshOnSwitch,
-              manualRefreshKey = historyManualRefreshKey,
-              firstItemFocusRequester = historyFocusRequester,
-              restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.History),
-              onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.History, key) },
-              onMoveLeftToNav = {
-                runCatching {
-                  navFocusRequesters.getValue(selectedDestination).requestFocus()
-                }.isSuccess
-              },
-              onVideoSelected = { video ->
-                playbackRequest = video.toPlaybackRequest(forceStartPosition = true)
-              },
-            )
-            AppDestination.Dynamic -> DynamicFeedScreen(
-              videoRepository = videoRepository,
-              isLoggedIn = userSession.isLoggedIn,
-              feedState = dynamicFeedState,
-              autoRefreshOnSwitch = autoRefreshOnSwitch,
-              manualRefreshKey = dynamicManualRefreshKey,
-              firstItemFocusRequester = dynamicFocusRequester,
-              restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Dynamic),
-              onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Dynamic, key) },
-              onMoveLeftToNav = {
-                runCatching {
-                  navFocusRequesters.getValue(selectedDestination).requestFocus()
-                }.isSuccess
-              },
-              onVideoSelected = { video ->
-                playbackRequest = video.toPlaybackRequest()
-              },
-            )
-            AppDestination.Settings -> SettingsScreen(
-              settings = settings,
-              cacheSizeText = cacheSizeBytes?.let(::formatCacheSize) ?: stringResource(R.string.settings_clear_cache_calculating),
-              codecCapability = codecCapability,
-              firstItemFocusRequester = settingsFocusRequester,
-              onMoveLeftToNav = {
-                runCatching {
-                  if (accountSelected) {
-                    accountFocusRequester.requestFocus()
-                  } else {
-                    navFocusRequesters.getValue(selectedDestination).requestFocus()
-                  }
-                }.isSuccess
-              },
-              onLowSpecModeChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setLowSpecMode(enabled)
-                }
-              },
-              onChineseTextVariantChange = { variant ->
-                coroutineScope.launch {
-                  appSettingsStore.setChineseTextVariant(variant)
-                }
-              },
-              onClearCache = {
-                coroutineScope.launch {
-                  val result = appCacheManager.clearCache()
-                  cacheSizeBytes = appCacheManager.cacheSizeBytes()
-                  Toast.makeText(
-                    localizedContext,
-                    localizedContext.getString(R.string.settings_clear_cache_done, formatCacheSize(result.clearedBytes)),
-                    Toast.LENGTH_SHORT,
-                  ).show()
-                }
-              },
-              onSeekPreviewSpritesEnabledChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setSeekPreviewSpritesEnabled(enabled)
-                }
-              },
-              onPlaybackQualityPreferenceChange = { preference ->
-                coroutineScope.launch {
-                  appSettingsStore.setPlaybackQualityPreference(preference)
-                }
-              },
-              onPlaybackCodecPreferenceChange = { preference ->
-                coroutineScope.launch {
-                  appSettingsStore.setPlaybackCodecPreference(preference)
-                }
-              },
-              onAirJumpAssistantEnabledChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAirJumpAssistantEnabled(enabled)
-                }
-              },
-              onConfirmPlaybackExitChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setConfirmPlaybackExit(enabled)
-                }
-              },
-              onAutoPlayNextEpisodeChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAutoPlayNextEpisode(enabled)
-                }
-              },
-              onAutoPlayRelatedVideoChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAutoPlayRelatedVideo(enabled)
-                }
-              },
-              onAutoReturnHomeOnCompletionChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAutoReturnHomeOnCompletion(enabled)
-                }
-              },
-              onShowClockChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setShowClock(enabled)
-                }
-              },
-              onAutoConfirmOnFocusChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAutoConfirmOnFocus(enabled)
-                }
-              },
-              onAutoRefreshOnSwitchChange = { enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setAutoRefreshOnSwitch(enabled)
-                }
-              },
-              onHomeSectionEnabledChange = { section, enabled ->
-                coroutineScope.launch {
-                  appSettingsStore.setHomeSectionEnabled(section, enabled)
-                }
-              },
-            )
-          }
+          PlayerScreen(
+            request = displayedPlaybackRequest,
+            videoRepository = videoRepository,
+            playbackRepository = playbackRepository,
+            danmakuSettingsStore = danmakuSettingsStore,
+            playbackHttpClient = playbackHttpClient,
+            playbackCodecPreference = effectivePlaybackCodecPreference,
+            playbackQualityPreference = settings.playbackQualityPreference,
+            seekPreviewSpritesEnabled = settings.seekPreviewSpritesEnabled,
+            airJumpAssistantEnabled = settings.airJumpAssistantEnabled,
+            confirmPlaybackExit = settings.confirmPlaybackExit,
+            autoPlayNextEpisode = settings.autoPlayNextEpisode,
+            autoPlayRelatedVideo = settings.autoPlayRelatedVideo,
+            autoReturnHomeOnCompletion = settings.autoReturnHomeOnCompletion,
+            showClock = settings.showClock,
+            onBack = {
+              playbackFocusRestoreDestination = selectedDestination
+              playbackRequest = null
+              playbackFocusRestoreRequestKey += 1
+            },
+          )
         }
       }
-      if (settings.showClock && activePlaybackRequest == null) {
-        ClockOverlay(
+      if (transitionScrimAlpha > 0.01f) {
+        Box(
           modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(
-              top = BiliSizing.ClockOverlayTopPadding,
-              end = BiliSizing.ClockOverlayEndPadding,
-            ),
-        )
-      }
-      if (activePlaybackRequest != null) {
-        PlayerScreen(
-          request = activePlaybackRequest,
-          videoRepository = videoRepository,
-          playbackRepository = playbackRepository,
-          danmakuSettingsStore = danmakuSettingsStore,
-          playbackHttpClient = playbackHttpClient,
-          playbackCodecPreference = effectivePlaybackCodecPreference,
-          playbackQualityPreference = settings.playbackQualityPreference,
-          seekPreviewSpritesEnabled = settings.seekPreviewSpritesEnabled,
-          airJumpAssistantEnabled = settings.airJumpAssistantEnabled,
-          confirmPlaybackExit = settings.confirmPlaybackExit,
-          autoPlayNextEpisode = settings.autoPlayNextEpisode,
-          autoPlayRelatedVideo = settings.autoPlayRelatedVideo,
-          autoReturnHomeOnCompletion = settings.autoReturnHomeOnCompletion,
-          showClock = settings.showClock,
-          onBack = {
-            playbackFocusRestoreDestination = selectedDestination
-            playbackRequest = null
-            playbackFocusRestoreRequestKey += 1
-          },
+            .fillMaxSize()
+            .background(BiliColors.VideoBlack.copy(alpha = transitionScrimAlpha)),
         )
       }
     }
@@ -647,6 +751,110 @@ private fun formatCacheSize(bytes: Long): String {
 }
 
 @Composable
+private fun HomeAppBackground(
+  colors: HomeColorScheme,
+  refinedVisualsEnabled: Boolean,
+  cinematicVisualsEnabled: Boolean,
+) {
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(
+        Brush.verticalGradient(
+          colors = listOf(colors.backgroundTop, colors.backgroundBottom),
+        ),
+      ),
+  ) {
+    if (cinematicVisualsEnabled) {
+      val drift = BiliFocus.HomeBackgroundCinematicDrift
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        val radius = maxOf(size.width, size.height)
+        drawRect(
+          brush = Brush.verticalGradient(
+            colors = listOf(
+              colors.backgroundTop,
+              colors.backgroundBottom,
+              colors.cardSurface.copy(alpha = BiliFocus.HomeBackgroundCinematicCardSurfaceAlpha),
+            ),
+          ),
+        )
+        drawRect(
+          brush = Brush.radialGradient(
+            colors = listOf(colors.ambientA.copy(alpha = BiliFocus.HomeBackgroundCinematicAmbientAAlpha), BiliColors.Transparent),
+            center = Offset(
+              x = size.width * (BiliFocus.HomeBackgroundCinematicAmbientAX + drift * BiliFocus.HomeBackgroundCinematicAmbientADriftX),
+              y = size.height * (BiliFocus.HomeBackgroundCinematicAmbientAY + drift * BiliFocus.HomeBackgroundCinematicAmbientADriftY),
+            ),
+            radius = radius * BiliFocus.HomeBackgroundCinematicAmbientARadius,
+          ),
+        )
+        drawRect(
+          brush = Brush.radialGradient(
+            colors = listOf(colors.ambientB.copy(alpha = BiliFocus.HomeBackgroundCinematicAmbientBAlpha), BiliColors.Transparent),
+            center = Offset(
+              x = size.width * (BiliFocus.HomeBackgroundCinematicAmbientBX - drift * BiliFocus.HomeBackgroundCinematicAmbientBDriftX),
+              y = size.height * (BiliFocus.HomeBackgroundCinematicAmbientBY + drift * BiliFocus.HomeBackgroundCinematicAmbientBDriftY),
+            ),
+            radius = radius * BiliFocus.HomeBackgroundCinematicAmbientBRadius,
+          ),
+        )
+        drawRect(
+          brush = Brush.radialGradient(
+            colors = listOf(colors.ambientA.copy(alpha = BiliFocus.HomeBackgroundCinematicAmbientCAlpha), BiliColors.Transparent),
+            center = Offset(
+              x = size.width * (BiliFocus.HomeBackgroundCinematicAmbientCX + drift * BiliFocus.HomeBackgroundCinematicAmbientCDriftX),
+              y = size.height * (BiliFocus.HomeBackgroundCinematicAmbientCY - drift * BiliFocus.HomeBackgroundCinematicAmbientCDriftY),
+            ),
+            radius = radius * BiliFocus.HomeBackgroundCinematicAmbientCRadius,
+          ),
+        )
+        val bokehColor = colors.textPrimary.copy(alpha = BiliFocus.HomeBackgroundCinematicBokehAlpha)
+        BiliFocus.HomeBackgroundCinematicBokehDots.forEach { dot ->
+          val center = Offset(
+            x = size.width * dot.xFraction,
+            y = size.height * dot.yFraction,
+          )
+          drawRect(
+            brush = Brush.radialGradient(
+              colors = listOf(bokehColor, BiliColors.Transparent),
+              center = center + Offset(
+                x = drift * BiliFocus.HomeBackgroundCinematicBokehDriftX,
+                y = drift * BiliFocus.HomeBackgroundCinematicBokehDriftY,
+              ),
+              radius = dot.radius + drift * BiliFocus.HomeBackgroundCinematicBokehRadiusDrift,
+            ),
+          )
+        }
+      }
+    } else if (refinedVisualsEnabled) {
+      Canvas(modifier = Modifier.fillMaxSize()) {
+        val radius = maxOf(size.width, size.height)
+        drawRect(
+          brush = Brush.radialGradient(
+            colors = listOf(colors.ambientA, BiliColors.Transparent),
+            center = Offset(
+              x = size.width * BiliFocus.HomeBackgroundRefinedAmbientAX,
+              y = size.height * BiliFocus.HomeBackgroundRefinedAmbientAY,
+            ),
+            radius = radius * BiliFocus.HomeBackgroundRefinedAmbientARadius,
+          ),
+        )
+        drawRect(
+          brush = Brush.radialGradient(
+            colors = listOf(colors.ambientB, BiliColors.Transparent),
+            center = Offset(
+              x = size.width * BiliFocus.HomeBackgroundRefinedAmbientBX,
+              y = size.height * BiliFocus.HomeBackgroundRefinedAmbientBY,
+            ),
+            radius = radius * BiliFocus.HomeBackgroundRefinedAmbientBRadius,
+          ),
+        )
+      }
+    }
+  }
+}
+
+@Composable
 private fun AppSidebar(
   selectedDestination: AppDestination,
   accountSelected: Boolean,
@@ -659,11 +867,44 @@ private fun AppSidebar(
   shouldAutoConfirmDestination: (AppDestination) -> Boolean,
   onMoveRight: (AppDestination) -> Boolean,
 ) {
+  val homeColors = LocalHomeColors.current
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled
+  val sidebarShape = RoundedCornerShape(
+    topStart = BiliRadius.Sidebar,
+    topEnd = BiliRadius.None,
+    bottomEnd = BiliRadius.None,
+    bottomStart = BiliRadius.Sidebar,
+  )
+  val sidebarBackground = if (cinematicVisualsEnabled) {
+    Brush.horizontalGradient(
+      colors = listOf(
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarCinematicStartAlpha),
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarCinematicMidAlpha),
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarCinematicEndAlpha),
+      ),
+    )
+  } else {
+    Brush.horizontalGradient(
+      colors = listOf(
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarRefinedStartAlpha),
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarRefinedMidAlpha),
+        homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarRefinedEndAlpha),
+      ),
+    )
+  }
+  val sidebarBorder = if (cinematicVisualsEnabled) {
+    homeColors.textPrimary.copy(alpha = BiliFocus.HomeSidebarCinematicBorderAlpha)
+  } else {
+    homeColors.glassBorder
+  }
   Column(
     modifier = Modifier
       .width(BiliSizing.SidebarWidth)
       .fillMaxHeight()
-      .background(BiliColors.Surface)
+      .clip(sidebarShape)
+      .background(sidebarBackground)
+      .border(BorderStroke(BiliFocus.RestingBorderWidth, sidebarBorder), sidebarShape)
       .padding(horizontal = BiliSpacing.Lg, vertical = BiliSizing.ContentPadding),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.spacedBy(BiliSpacing.Lg),
@@ -710,8 +951,40 @@ private fun AccountNavItem(
   onClick: () -> Unit,
   onMoveRight: () -> Boolean,
 ) {
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
+  val cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled
   BiliFocusableSurface(
     shape = CircleShape,
+    shadowOnFocus = !cinematicVisualsEnabled,
+    focusedScale = if (cinematicVisualsEnabled) BiliFocus.CinematicNavScale else BiliFocus.CardScale,
+    focusedBorderColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicFocusedBorderAlpha)
+    } else {
+      null
+    },
+    restingBorderColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicRestingBorderAlpha)
+    } else {
+      null
+    },
+    focusedBorderWidth = if (cinematicVisualsEnabled) BiliFocus.RestingBorderWidth else BiliFocus.BorderWidth,
+    focusedBackgroundColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicFocusedBackgroundAlpha)
+    } else {
+      null
+    },
+    restingBackgroundColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(
+        alpha = if (selected) {
+          BiliFocus.CinematicSelectedBackgroundAlpha
+        } else {
+          BiliFocus.CinematicRestingBackgroundAlpha
+        },
+      )
+    } else {
+      null
+    },
     modifier = modifier
       .fillMaxWidth()
       .height(BiliSizing.NavItemHeight)
@@ -755,6 +1028,7 @@ private fun AccountStatusAvatar(userSession: UserSession) {
 private fun AccountAvatar(userSession: UserSession) {
   val context = LocalContext.current
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val accountAvatarRequestSizePx = if (performancePolicy.lowSpecMode) {
     performancePolicy.ownerAvatarSizePx
   } else {
@@ -799,7 +1073,7 @@ private fun AccountAvatar(userSession: UserSession) {
       Icon(
         painter = painterResource(R.drawable.ic_nav_account),
         contentDescription = stringResource(R.string.nav_login),
-        tint = if (userSession.isLoggedIn) BiliColors.BiliPink else BiliColors.TextSecondary,
+        tint = if (userSession.isLoggedIn) homeColors.accent else homeColors.textSecondary,
         modifier = Modifier.size(BiliSizing.NavIconSize),
       )
     }
@@ -837,9 +1111,41 @@ private fun AppNavItem(
   onMoveRight: () -> Boolean,
 ) {
   var focused by remember { mutableStateOf(false) }
+  val homeColors = LocalHomeColors.current
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled
 
   BiliFocusableSurface(
     shape = RoundedCornerShape(BiliRadius.Pill),
+    shadowOnFocus = !cinematicVisualsEnabled,
+    focusedScale = if (cinematicVisualsEnabled) BiliFocus.CinematicNavScale else BiliFocus.CardScale,
+    focusedBorderColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicFocusedBorderAlpha)
+    } else {
+      null
+    },
+    restingBorderColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicRestingBorderAlpha)
+    } else {
+      null
+    },
+    focusedBorderWidth = if (cinematicVisualsEnabled) BiliFocus.RestingBorderWidth else BiliFocus.BorderWidth,
+    focusedBackgroundColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicFocusedBackgroundAlpha)
+    } else {
+      null
+    },
+    restingBackgroundColor = if (cinematicVisualsEnabled) {
+      homeColors.textPrimary.copy(
+        alpha = if (selected) {
+          BiliFocus.CinematicSelectedBackgroundAlpha
+        } else {
+          BiliFocus.CinematicRestingBackgroundAlpha
+        },
+      )
+    } else {
+      null
+    },
     modifier = modifier
       .fillMaxWidth()
       .height(BiliSizing.NavItemHeight)
@@ -867,7 +1173,7 @@ private fun AppNavItem(
       Icon(
         painter = painterResource(destination.iconRes),
         contentDescription = stringResource(destination.titleRes),
-        tint = if (selected || focused) BiliColors.BiliPink else BiliColors.TextSecondary,
+        tint = if (selected || focused) homeColors.accent else homeColors.textSecondary,
         modifier = Modifier
           .width(BiliSizing.NavIconSize)
           .height(BiliSizing.NavIconSize),

@@ -1,6 +1,7 @@
 package com.kirin.bilitv.ui.home
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -22,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,8 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
@@ -62,6 +65,8 @@ import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
+import com.kirin.bilitv.ui.theme.LocalHomeColors
+import kotlinx.coroutines.delay
 
 enum class VideoCardMode {
   Standard,
@@ -74,72 +79,112 @@ fun VideoCard(
   video: VideoSummary,
   modifier: Modifier = Modifier,
   mode: VideoCardMode = VideoCardMode.Standard,
+  interactionPaused: Boolean = false,
   onClick: () -> Unit = {},
   onFocused: () -> Unit = {},
 ) {
   var focused by remember { mutableStateOf(false) }
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val focusEffectsEnabled = performancePolicy.motionEnabled
+  val cinematicEffectsEnabled = performancePolicy.cinematicVisualEffectsEnabled
+  val cardInfoBackground = homeColors.cardInfoSurface
   val title = convertChineseText(video.title)
   val titleColor = if (focusEffectsEnabled) {
     animateColorAsState(
-      targetValue = if (focused) BiliColors.TextPrimary else BiliColors.TextSecondary,
+      targetValue = if (focused) homeColors.textPrimary else homeColors.textSecondary,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "videoCardTitleColor",
     ).value
   } else {
-    if (focused) BiliColors.TextPrimary else BiliColors.TextSecondary
+    if (focused) homeColors.textPrimary else homeColors.textSecondary
   }
 
   BiliFocusableSurface(
     modifier = modifier.fillMaxWidth(),
     scaleOnFocus = focusEffectsEnabled,
-    shadowOnFocus = true,
+    shadowOnFocus = false,
+    focusedScale = BiliFocus.CardScale,
+    focusedBorderColor = if (cinematicEffectsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicCardFocusedBorderAlpha)
+    } else {
+      null
+    },
+    restingBorderColor = if (cinematicEffectsEnabled) {
+      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicCardRestingBorderAlpha)
+    } else {
+      null
+    },
+    focusedBorderWidth = if (cinematicEffectsEnabled) {
+      BiliFocus.RestingBorderWidth
+    } else {
+      BiliFocus.BorderWidth
+    },
+    restingBackgroundColor = if (cinematicEffectsEnabled) {
+      homeColors.cardSurface
+    } else {
+      null
+    },
+    focusedBackgroundColor = if (cinematicEffectsEnabled) {
+      homeColors.cardFocusedSurface
+    } else {
+      null
+    },
     onClick = onClick,
     onFocused = onFocused,
     onFocusChanged = { focused = it },
   ) {
-    Column {
-      VideoCover(
-        video = video,
-        mode = mode,
-        focused = focused,
-        focusEffectsEnabled = focusEffectsEnabled,
-      )
-      Column(
-        modifier = Modifier
-          .height(BiliSizing.VideoTextHeight)
-          .padding(horizontal = BiliSpacing.Sm, vertical = BiliSpacing.Xs),
-      ) {
-        Text(
-          text = title,
-          color = titleColor,
-          fontSize = BiliTypography.CardTitle,
-          lineHeight = BiliTypography.CardTitleLineHeight,
-          fontWeight = FontWeight.Medium,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier
-            .fillMaxWidth()
-            .then(
-              if (focused && focusEffectsEnabled) {
-                Modifier.basicMarquee(
-                  iterations = Int.MAX_VALUE,
-                  repeatDelayMillis = BiliMotion.TitleMarqueeRepeatDelayMs,
-                  initialDelayMillis = BiliMotion.TitleMarqueeInitialDelayMs,
-                  velocity = BiliSizing.TitleMarqueeVelocity,
-                )
-              } else {
-                Modifier
-              },
-            ),
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        MetadataRow(
+    Box {
+      Column {
+        VideoCover(
           video = video,
           mode = mode,
           focused = focused,
           focusEffectsEnabled = focusEffectsEnabled,
+          interactionPaused = interactionPaused,
+        )
+        Column(
+          modifier = Modifier
+            .height(BiliSizing.VideoTextHeight)
+            .background(cardInfoBackground)
+            .padding(horizontal = BiliSpacing.Sm, vertical = BiliSpacing.Xs),
+        ) {
+          Text(
+            text = title,
+            color = titleColor,
+            fontSize = BiliTypography.CardTitle,
+            lineHeight = BiliTypography.CardTitleLineHeight,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = if (focused) TextOverflow.Clip else TextOverflow.Ellipsis,
+            modifier = Modifier
+              .fillMaxWidth()
+              .then(
+                if (focused && !interactionPaused) {
+                  Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    repeatDelayMillis = BiliMotion.TitleMarqueeRepeatDelayMs,
+                    initialDelayMillis = BiliMotion.TitleMarqueeInitialDelayMs,
+                    velocity = BiliSizing.TitleMarqueeVelocity,
+                  )
+                } else {
+                  Modifier
+                },
+              ),
+          )
+          Spacer(modifier = Modifier.weight(1f))
+          MetadataRow(
+            video = video,
+            mode = mode,
+            focused = focused,
+            focusEffectsEnabled = focusEffectsEnabled,
+          )
+        }
+      }
+      if (focused && cinematicEffectsEnabled) {
+        CinematicCardShine(
+          interactionPaused = interactionPaused,
+          modifier = Modifier.matchParentSize(),
         )
       }
     }
@@ -153,6 +198,7 @@ private fun MetadataRow(
   focused: Boolean,
   focusEffectsEnabled: Boolean,
 ) {
+  val homeColors = LocalHomeColors.current
   val ownerName = convertChineseText(video.ownerName)
   val relativeText = rememberVideoCardRelativeText()
   val trailingText = when (mode) {
@@ -162,21 +208,21 @@ private fun MetadataRow(
   }
   val ownerColor = if (focusEffectsEnabled) {
     animateColorAsState(
-      targetValue = if (focused) BiliColors.TextPrimary else BiliColors.TextSecondary,
+      targetValue = if (focused) homeColors.textPrimary else homeColors.textSecondary,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "videoCardOwnerColor",
     ).value
   } else {
-    BiliColors.TextSecondary
+    homeColors.textSecondary
   }
   val trailingColor = if (focusEffectsEnabled) {
     animateColorAsState(
-      targetValue = if (focused) BiliColors.TextSecondary else BiliColors.TextTertiary,
+      targetValue = if (focused) homeColors.textSecondary else homeColors.textTertiary,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "videoCardTrailingColor",
     ).value
   } else {
-    BiliColors.TextTertiary
+    homeColors.textTertiary
   }
 
   Row(
@@ -215,11 +261,12 @@ private fun MetadataRow(
 @Composable
 private fun OwnerAvatar(video: VideoSummary) {
   val performancePolicy = LocalBiliPerformancePolicy.current
-  val fallbackPainter = ColorPainter(BiliColors.SurfaceElevated)
+  val homeColors = LocalHomeColors.current
+  val fallbackPainter = ColorPainter(homeColors.glassSurfaceStrong)
   val modifier = Modifier
     .size(BiliSizing.OwnerAvatarSize)
     .clip(CircleShape)
-    .background(BiliColors.SurfaceElevated)
+    .background(homeColors.glassSurfaceStrong)
 
   if (video.ownerFace.isBlank()) {
     Box(modifier = modifier)
@@ -254,14 +301,73 @@ private fun OwnerAvatar(video: VideoSummary) {
 }
 
 @Composable
+private fun CinematicCardShine(
+  interactionPaused: Boolean,
+  modifier: Modifier = Modifier,
+) {
+  val homeColors = LocalHomeColors.current
+  val shineProgress = remember { Animatable(1f) }
+
+  LaunchedEffect(interactionPaused) {
+    if (interactionPaused) {
+      shineProgress.snapTo(1f)
+    } else {
+      delay(BiliMotion.FocusShineInitialDelayMs)
+      while (true) {
+        shineProgress.snapTo(0f)
+        shineProgress.animateTo(
+          targetValue = 1f,
+          animationSpec = tween(BiliMotion.FocusShineMs, easing = BiliMotion.FocusEasing),
+        )
+        delay(BiliMotion.FocusShineRepeatDelayMs)
+      }
+    }
+  }
+
+  Box(
+    modifier = modifier.drawBehind {
+      if (!interactionPaused) {
+        val hazeWidth = size.minDimension * BiliFocus.CinematicCardSheenHazeWidthFraction
+        val coreWidth = size.minDimension * BiliFocus.CinematicCardSheenCoreWidthFraction
+        val ridgeWidth = size.minDimension * BiliFocus.CinematicCardSheenRidgeWidthFraction
+        val travel = size.width + size.height + hazeWidth * BiliFocus.CinematicCardSheenTravelPaddingMultiplier
+        val sweep = shineProgress.value * travel - hazeWidth
+        val start = Offset(sweep - size.height, size.height)
+        val end = Offset(sweep, 0f)
+        drawLine(
+          color = homeColors.shineColor.copy(alpha = BiliFocus.CinematicCardSheenEdgeAlpha),
+          start = start,
+          end = end,
+          strokeWidth = hazeWidth,
+        )
+        drawLine(
+          color = homeColors.shineColor.copy(alpha = BiliFocus.CinematicCardSheenCenterAlpha),
+          start = start,
+          end = end,
+          strokeWidth = coreWidth,
+        )
+        drawLine(
+          color = homeColors.shineColor.copy(alpha = BiliFocus.CinematicCardSheenRidgeAlpha),
+          start = start,
+          end = end,
+          strokeWidth = ridgeWidth,
+        )
+      }
+    },
+  )
+}
+
+@Composable
 private fun VideoCover(
   video: VideoSummary,
   mode: VideoCardMode,
   focused: Boolean,
   focusEffectsEnabled: Boolean,
+  interactionPaused: Boolean,
 ) {
   val context = LocalContext.current
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val homeColors = LocalHomeColors.current
   val request = remember(
     context,
     video.pic,
@@ -279,12 +385,39 @@ private fun VideoCover(
       memoryCacheEnabled = performancePolicy.imageMemoryCacheEnabled,
     )
   }
-  val fallbackPainter = ColorPainter(BiliColors.SurfaceElevated)
   val title = convertChineseText(video.title)
   val badge = convertChineseText(video.badge)
+  val cinematicEffectsEnabled = performancePolicy.cinematicVisualEffectsEnabled
+  val coverBackground = homeColors.glassSurfaceStrong
+  val fallbackPainter = ColorPainter(coverBackground)
+  var blurFocused by remember { mutableStateOf(false) }
+  LaunchedEffect(
+    focused,
+    focusEffectsEnabled,
+    interactionPaused,
+    performancePolicy.focusedCoverBlurEnabled,
+    cinematicEffectsEnabled,
+  ) {
+    if (
+      focused &&
+      focusEffectsEnabled &&
+      !interactionPaused &&
+      performancePolicy.focusedCoverBlurEnabled &&
+      !cinematicEffectsEnabled
+    ) {
+      delay(BiliMotion.FocusedCoverBlurDelayMs)
+      blurFocused = true
+    } else {
+      blurFocused = false
+    }
+  }
   val highlightAlpha = if (focusEffectsEnabled) {
     animateFloatAsState(
-      targetValue = if (focused) BiliFocus.CoverHighlightAlpha else 0f,
+      targetValue = if (focused) {
+        if (cinematicEffectsEnabled) BiliFocus.CinematicCoverHighlightAlpha else BiliFocus.CoverHighlightAlpha
+      } else {
+        0f
+      },
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "videoCoverHighlight",
     ).value
@@ -293,7 +426,7 @@ private fun VideoCover(
   }
   val blurAlpha = if (focusEffectsEnabled && performancePolicy.focusedCoverBlurEnabled) {
     animateFloatAsState(
-      targetValue = if (focused) BiliFocus.FocusedCoverBlurAlpha else 0f,
+      targetValue = if (blurFocused) BiliFocus.FocusedCoverBlurAlpha else 0f,
       animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
       label = "videoCoverBlur",
     ).value
@@ -306,7 +439,7 @@ private fun VideoCover(
       .fillMaxWidth()
       .aspectRatio(BiliSizing.VideoThumbnailAspectRatio)
       .clip(RoundedCornerShape(BiliRadius.Card))
-      .background(BiliColors.SurfaceElevated),
+      .background(coverBackground),
   ) {
     AsyncImage(
       model = request,
@@ -335,7 +468,13 @@ private fun VideoCover(
       Box(
         modifier = Modifier
           .fillMaxSize()
-          .background(Color.White.copy(alpha = highlightAlpha)),
+          .background(homeColors.textPrimary.copy(alpha = highlightAlpha)),
+      )
+    }
+
+    if (focused && cinematicEffectsEnabled) {
+      CinematicCoverPolish(
+        modifier = Modifier.fillMaxSize(),
       )
     }
 
@@ -367,12 +506,33 @@ private fun VideoCover(
 }
 
 @Composable
+private fun CinematicCoverPolish(
+  modifier: Modifier = Modifier,
+) {
+  val homeColors = LocalHomeColors.current
+
+  Box(
+    modifier = modifier
+      .background(
+        Brush.verticalGradient(
+          colors = listOf(
+            BiliColors.Transparent,
+            homeColors.accent.copy(alpha = BiliFocus.CinematicFocusGlowAlpha * BiliFocus.CinematicCoverGlowAlphaMultiplier),
+            BiliColors.VideoBlack.copy(alpha = BiliFocus.CinematicCoverVignetteAlpha),
+          ),
+        ),
+      )
+  )
+}
+
+@Composable
 private fun VideoBadge(text: String, modifier: Modifier = Modifier) {
+  val homeColors = LocalHomeColors.current
   Box(
     modifier = modifier
       .height(BiliSizing.VideoBadgeMinHeight)
       .clip(RoundedCornerShape(BiliRadius.Card))
-      .background(BiliColors.BiliPink)
+      .background(homeColors.accent)
       .padding(horizontal = BiliSpacing.Sm),
     contentAlignment = Alignment.Center,
   ) {
@@ -406,6 +566,7 @@ private fun BottomScrim(modifier: Modifier = Modifier) {
 
 @Composable
 private fun StandardCoverMetadata(video: VideoSummary, modifier: Modifier = Modifier) {
+  val homeColors = LocalHomeColors.current
   Row(
     modifier = modifier.fillMaxWidth(),
     verticalAlignment = Alignment.CenterVertically,
@@ -430,7 +591,7 @@ private fun StandardCoverMetadata(video: VideoSummary, modifier: Modifier = Modi
     }
     Text(
       text = video.durationText(),
-      color = BiliColors.TextPrimary,
+      color = homeColors.textPrimary,
       fontSize = BiliTypography.CardOverlay,
       lineHeight = BiliTypography.CardOverlayLineHeight,
       fontWeight = FontWeight.Bold,
@@ -445,19 +606,20 @@ private fun VideoMetric(
   contentDescription: String,
   text: String,
 ) {
+  val homeColors = LocalHomeColors.current
   Row(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Icon(
       painter = painterResource(iconRes),
       contentDescription = contentDescription,
-      tint = BiliColors.TextSecondary,
+      tint = homeColors.textSecondary,
       modifier = Modifier.size(BiliSizing.VideoOverlayIconSize),
     )
     Spacer(modifier = Modifier.width(BiliSpacing.Xs))
     Text(
       text = text,
-      color = BiliColors.TextSecondary,
+      color = homeColors.textSecondary,
       fontSize = BiliTypography.CardOverlay,
       lineHeight = BiliTypography.CardOverlayLineHeight,
       maxLines = 1,
@@ -467,6 +629,7 @@ private fun VideoMetric(
 
 @Composable
 private fun HistoryCoverMetadata(video: VideoSummary, modifier: Modifier = Modifier) {
+  val homeColors = LocalHomeColors.current
   val completedText = stringResource(R.string.video_watch_completed)
   Column(
     modifier = modifier.fillMaxWidth(),
@@ -498,7 +661,7 @@ private fun HistoryCoverMetadata(video: VideoSummary, modifier: Modifier = Modif
         } else {
           Text(
             text = video.watchProgressText(completedText),
-            color = BiliColors.TextPrimary,
+            color = homeColors.textPrimary,
             fontSize = BiliTypography.CardOverlay,
             lineHeight = BiliTypography.CardOverlayLineHeight,
             fontWeight = FontWeight.Bold,
@@ -518,7 +681,7 @@ private fun HistoryCoverMetadata(video: VideoSummary, modifier: Modifier = Modif
         modifier = Modifier
           .fillMaxHeight()
           .fillMaxWidth(video.watchProgressRatio())
-          .background(BiliColors.BiliPink),
+          .background(homeColors.accent),
       )
     }
   }
@@ -526,11 +689,12 @@ private fun HistoryCoverMetadata(video: VideoSummary, modifier: Modifier = Modif
 
 @Composable
 private fun HistoryOverlayBadge(text: String, modifier: Modifier = Modifier) {
+  val homeColors = LocalHomeColors.current
   Box(
     modifier = modifier
       .height(BiliSizing.VideoBadgeMinHeight)
       .clip(RoundedCornerShape(BiliRadius.Card))
-      .background(BiliColors.BiliPink)
+      .background(homeColors.accent)
       .padding(horizontal = BiliSpacing.Sm),
     contentAlignment = Alignment.Center,
   ) {
