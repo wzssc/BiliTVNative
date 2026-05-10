@@ -5,9 +5,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,9 +17,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -31,8 +30,8 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import com.kirin.bilitv.ui.glass.biliLiquidGlassSurface
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
-import com.kirin.bilitv.ui.theme.BiliColors
 import com.kirin.bilitv.ui.theme.BiliFocus
 import com.kirin.bilitv.ui.theme.BiliMotion
 import com.kirin.bilitv.ui.theme.BiliRadius
@@ -51,8 +50,10 @@ fun BiliFocusableSurface(
   restingBorderWidth: Dp = BiliFocus.RestingBorderWidth,
   focusedShadowColor: Color? = null,
   focusedShadowElevation: Dp = BiliFocus.ShadowElevation,
+  focusedLift: Dp = BiliFocus.RestingLift,
   focusedBackgroundColor: Color? = null,
   restingBackgroundColor: Color? = null,
+  focusedForeground: (DrawScope.() -> Unit)? = null,
   onClick: () -> Unit = {},
   onFocused: () -> Unit = {},
   onFocusChanged: (Boolean) -> Unit = {},
@@ -62,6 +63,7 @@ fun BiliFocusableSurface(
   val performancePolicy = LocalBiliPerformancePolicy.current
   val homeColors = LocalHomeColors.current
   val focusShadowEnabled = performancePolicy.focusShadowEnabled && shadowOnFocus
+  val liquidGlassEnabled = performancePolicy.cinematicVisualEffectsEnabled && performancePolicy.liquidGlassCardsEnabled
   val targetFocusedBorderColor = focusedBorderColor ?: homeColors.accent
   val targetRestingBorderColor = restingBorderColor ?: homeColors.glassBorder
   val targetFocusedBackgroundColor = focusedBackgroundColor ?: homeColors.cardFocusedSurface
@@ -104,6 +106,19 @@ fun BiliFocusableSurface(
   } else {
     BiliFocus.RestingShadowElevation
   }
+  val lift = if (performancePolicy.motionEnabled) {
+    animateDpAsState(
+      targetValue = if (focused && scaleOnFocus) {
+        focusedLift
+      } else {
+        BiliFocus.RestingLift
+      },
+      animationSpec = tween(BiliMotion.FocusMs, easing = BiliMotion.FocusEasing),
+      label = "focusLift",
+    ).value
+  } else {
+    BiliFocus.RestingLift
+  }
   val borderColor = if (performancePolicy.motionEnabled) {
     animateColorAsState(
       targetValue = if (focused) targetFocusedBorderColor else targetRestingBorderColor,
@@ -135,15 +150,30 @@ fun BiliFocusableSurface(
       .graphicsLayer {
         scaleX = scale
         scaleY = scale
+        translationY = -lift.toPx()
         this.shadowElevation = if (focusShadowEnabled) shadowElevation.toPx() else 0f
         this.shape = shape
         clip = false
         ambientShadowColor = shadowColor
         spotShadowColor = shadowColor
       }
-      .clip(shape)
-      .background(backgroundColor)
-      .border(BorderStroke(borderWidth, borderColor), shape)
+      .biliLiquidGlassSurface(
+        enabled = liquidGlassEnabled,
+        shape = shape,
+        surfaceColor = backgroundColor,
+        borderColor = borderColor,
+        borderWidth = borderWidth,
+      )
+      .then(
+        if (focused && focusedForeground != null) {
+          Modifier.drawWithContent {
+            drawContent()
+            focusedForeground()
+          }
+        } else {
+          Modifier
+        },
+      )
       .onFocusChanged { focusState ->
         val nextFocused = focusState.isFocused || focusState.hasFocus
         if (focused != nextFocused) {
@@ -169,7 +199,9 @@ fun BiliFocusableSurface(
         onClick = onClick,
       ),
   ) {
-    content()
+    Box(modifier = Modifier.clip(shape)) {
+      content()
+    }
   }
 }
 

@@ -83,6 +83,8 @@ import com.kirin.bilitv.core.player.VideoshotData
 import com.kirin.bilitv.core.player.createTvPlaybackLoadControl
 import com.kirin.bilitv.ui.common.ClockOverlay
 import com.kirin.bilitv.ui.common.FeedStatusScreen
+import com.kirin.bilitv.ui.common.currentClockMinuteKey
+import com.kirin.bilitv.ui.common.currentClockText
 import com.kirin.bilitv.ui.i18n.LocalChineseTextConverter
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
@@ -91,6 +93,7 @@ import com.kirin.bilitv.ui.theme.BiliSizing
 import com.kirin.bilitv.ui.theme.BiliSpacing
 import com.kirin.bilitv.ui.theme.BiliTypography
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -112,6 +115,7 @@ fun PlayerScreen(
   autoPlayRelatedVideo: Boolean,
   autoReturnHomeOnCompletion: Boolean,
   showClock: Boolean,
+  showMiniProgressBar: Boolean,
   onBack: () -> Unit,
 ) {
   val context = LocalContext.current
@@ -120,6 +124,7 @@ fun PlayerScreen(
   val coroutineScope = rememberCoroutineScope()
   val performancePolicy = LocalBiliPerformancePolicy.current
   val textConverter = LocalChineseTextConverter.current
+  val showClockState = rememberUpdatedState(showClock)
   var activeRequest by remember(request) { mutableStateOf(request) }
   var displayRequest by remember(request) { mutableStateOf(request) }
   var playerState by remember(activeRequest.bvid, activeRequest.cid, activeRequest.preferredQualityId) {
@@ -136,6 +141,11 @@ fun PlayerScreen(
   var showUnfollowConfirm by remember { mutableStateOf(false) }
   var unfollowConfirmFocusedConfirm by remember { mutableStateOf(false) }
   var onlineCountText by remember { mutableStateOf("") }
+  var onlineCountRequestJob by remember { mutableStateOf<Job?>(null) }
+  var onlineCountRequestToken by remember { mutableLongStateOf(0L) }
+  var nextOnlineCountRefreshAtMs by remember { mutableLongStateOf(0L) }
+  var clockText by remember { mutableStateOf(currentClockText()) }
+  var clockMinuteKey by remember { mutableLongStateOf(currentClockMinuteKey()) }
   var currentCodecText by remember { mutableStateOf("") }
   var danmakuEntries by remember { mutableStateOf<List<DanmakuEntry>>(emptyList()) }
   var videoshotData by remember { mutableStateOf<VideoshotData?>(null) }
@@ -154,11 +164,10 @@ fun PlayerScreen(
   var danmakuSettings by remember { mutableStateOf(DanmakuSettings()) }
   var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
   var previewPositionMs by remember { mutableStateOf<Long?>(null) }
-  var positionMs by remember { mutableLongStateOf(0L) }
-  val danmakuPositionState = rememberUpdatedState(positionMs)
+  val playbackPositionState = remember { mutableLongStateOf(0L) }
+  val playbackDurationState = remember { mutableLongStateOf(0L) }
+  val playbackBufferedPercentageState = remember { mutableLongStateOf(0L) }
   var danmakuSyncToken by remember { mutableLongStateOf(0L) }
-  var durationMs by remember { mutableLongStateOf(0L) }
-  var bufferedPercentage by remember { mutableLongStateOf(0L) }
   var playbackPaused by remember { mutableStateOf(false) }
   var playerActuallyPlaying by remember { mutableStateOf(false) }
   var retryKey by remember { mutableLongStateOf(0L) }
@@ -167,6 +176,7 @@ fun PlayerScreen(
   var playbackCompletionToast by remember { mutableStateOf<Toast?>(null) }
   var completionReported by remember { mutableStateOf(false) }
   var completionActionToken by remember { mutableLongStateOf(0L) }
+  var completionActionJob by remember { mutableStateOf<Job?>(null) }
   val controlsFocusRequester = remember { FocusRequester() }
   val player = remember {
     ExoPlayer.Builder(context)
@@ -183,6 +193,10 @@ fun PlayerScreen(
 
   DisposableEffect(Unit) {
     onDispose {
+      completionActionJob?.cancel()
+      completionActionJob = null
+      onlineCountRequestJob?.cancel()
+      onlineCountRequestJob = null
       playbackExitConfirmToast?.cancel()
       playbackCompletionToast?.cancel()
     }
@@ -214,14 +228,26 @@ fun PlayerScreen(
   }
 
   fun cancelPendingCompletionAction() {
+    completionActionJob?.cancel()
+    completionActionJob = null
     completionActionToken += 1L
     cancelPlaybackCompletionToast()
+  }
+
+  fun resetOnlineCountPolling() {
+    if (onlineCountText.isNotEmpty() || onlineCountRequestJob != null || nextOnlineCountRefreshAtMs != 0L) {
+      onlineCountRequestJob?.cancel()
+      onlineCountRequestJob = null
+      onlineCountRequestToken += 1L
+      nextOnlineCountRefreshAtMs = 0L
+      onlineCountText = ""
+    }
   }
 
   fun acquirePlaybackWakeLock() {
     runCatching {
       if (playbackWakeLock?.isHeld != true) {
-        playbackWakeLock?.acquire()
+        playbackWakeLock?.acquire(PlayerWakeLockTimeoutMs)
       }
     }
   }
@@ -267,7 +293,8 @@ fun PlayerScreen(
   }
 
   fun maxDurationMs(): Long {
-    return player.duration.takeIf { it != C.TIME_UNSET && it > 0L } ?: durationMs.coerceAtLeast(0L)
+    return player.duration.takeIf { it != C.TIME_UNSET && it > 0L }
+      ?: playbackDurationState.longValue.coerceAtLeast(0L)
   }
 
   fun alignPreviewTarget(targetMs: Long, currentPreviewMs: Long?, deltaMs: Long, maxDurationMs: Long): Long {
@@ -288,7 +315,7 @@ fun PlayerScreen(
   fun commitPreviewSeek(revealControls: Boolean = controlsVisible || progressFocused) {
     val target = previewPositionMs ?: return
     player.seekTo(target.coerceIn(0L, maxDurationMs().takeIf { it > 0L } ?: Long.MAX_VALUE))
-    positionMs = target
+    playbackPositionState.longValue = target
     danmakuSyncToken += 1L
     previewPositionMs = null
     if (revealControls) {
@@ -300,7 +327,9 @@ fun PlayerScreen(
 
   fun updatePreviewSeek(deltaMs: Long, revealControls: Boolean = controlsVisible || progressFocused) {
     val maxDuration = maxDurationMs().takeIf { it > 0L } ?: Long.MAX_VALUE
-    val basePosition = previewPositionMs ?: player.currentPosition.takeIf { it >= 0L } ?: positionMs
+    val basePosition = previewPositionMs
+      ?: player.currentPosition.takeIf { it >= 0L }
+      ?: playbackPositionState.longValue
     val target = (basePosition + deltaMs).coerceIn(0L, maxDuration)
     previewPositionMs = alignPreviewTarget(
       targetMs = target,
@@ -349,7 +378,7 @@ fun PlayerScreen(
       skippedAirJumpIds = skippedAirJumpIds + hitSegment.id
       warnedAirJumpIds = warnedAirJumpIds + hitSegment.id
       player.seekTo(targetPositionMs)
-      positionMs = targetPositionMs
+      playbackPositionState.longValue = targetPositionMs
       danmakuSyncToken += 1L
       val duration = maxDurationMs().takeIf { it > 0L } ?: 0L
       if (duration <= 0L || targetPositionMs < duration - AirJumpCompletionToastSuppressMs) {
@@ -373,7 +402,8 @@ fun PlayerScreen(
   suspend fun saveProgressNow() {
     val state = playerState as? PlayerScreenState.Ready ?: return
     val currentPositionMs = player.currentPosition.takeIf { it >= 0L } ?: 0L
-    val currentDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: durationMs
+    val currentDurationMs = player.duration.takeIf { it != C.TIME_UNSET }
+      ?: playbackDurationState.longValue
     playbackRepository.saveProgress(
       bvid = state.info.bvid,
       cid = state.info.cid,
@@ -385,7 +415,7 @@ fun PlayerScreen(
   suspend fun reportProgressNow(overrideProgressSeconds: Int? = null) {
     val state = playerState as? PlayerScreenState.Ready ?: return
     val progressSeconds = overrideProgressSeconds
-      ?: ((player.currentPosition.takeIf { it >= 0L } ?: positionMs).coerceAtLeast(0L) / 1000L).toInt()
+      ?: ((player.currentPosition.takeIf { it >= 0L } ?: playbackPositionState.longValue).coerceAtLeast(0L) / 1000L).toInt()
     playbackRepository.reportProgress(
       bvid = state.info.bvid,
       cid = state.info.cid,
@@ -613,9 +643,8 @@ fun PlayerScreen(
     if (clearMetadata) {
       metadata = null
     }
-    cancelPlaybackCompletionToast()
-    completionActionToken += 1L
-    onlineCountText = ""
+    cancelPendingCompletionAction()
+    resetOnlineCountPolling()
     sidePanelVideos = emptyList()
     activePanel = PlayerPanel.None
     progressFocused = false
@@ -644,53 +673,60 @@ fun PlayerScreen(
   }
 
   fun scheduleCompletionAction() {
+    completionActionJob?.cancel()
     val actionToken = ++completionActionToken
-    coroutineScope.launch {
-      if (autoPlayNextEpisode) {
-        val videoMetadata = resolveDisplayMetadata()
-        if (completionActionToken != actionToken || !completionReported) return@launch
-        val nextRequest = nextEpisodeRequest(videoMetadata)
-        if (nextRequest != null) {
-          val nextTitle = videoMetadata?.pages
-            ?.firstOrNull { episode -> episode.cid == nextRequest.cid }
-            ?.title
-            .orEmpty()
-            .ifBlank { nextRequest.title }
-          showPlaybackCompletionToast(
-            context.getString(R.string.player_completion_next_episode_toast, textConverter.convert(nextTitle)),
-          )
+    completionActionJob = coroutineScope.launch {
+      try {
+        if (autoPlayNextEpisode) {
+          val videoMetadata = resolveDisplayMetadata()
+          if (completionActionToken != actionToken || !completionReported) return@launch
+          val nextRequest = nextEpisodeRequest(videoMetadata)
+          if (nextRequest != null) {
+            val nextTitle = videoMetadata?.pages
+              ?.firstOrNull { episode -> episode.cid == nextRequest.cid }
+              ?.title
+              .orEmpty()
+              .ifBlank { nextRequest.title }
+            showPlaybackCompletionToast(
+              context.getString(R.string.player_completion_next_episode_toast, textConverter.convert(nextTitle)),
+            )
+            delay(CompletionActionDelayMs)
+            if (completionActionToken == actionToken && completionReported) {
+              startPlaybackRequest(nextRequest, clearMetadata = false)
+            }
+            return@launch
+          }
+        }
+
+        if (autoPlayRelatedVideo) {
+          val relatedVideo = runCatching {
+            videoRepository.getRelatedVideos(displayRequest.bvid)
+              .firstOrNull { video -> !video.bvid.equals(displayRequest.bvid, ignoreCase = true) }
+          }.getOrNull()
+          if (completionActionToken != actionToken || !completionReported) return@launch
+          if (relatedVideo != null) {
+            showPlaybackCompletionToast(
+              context.getString(R.string.player_completion_related_toast, textConverter.convert(relatedVideo.title)),
+            )
+            delay(CompletionActionDelayMs)
+            if (completionActionToken == actionToken && completionReported) {
+              startPlaybackRequest(relatedVideo.toPlaybackRequest(), clearMetadata = true)
+            }
+            return@launch
+          }
+        }
+
+        if (autoReturnHomeOnCompletion) {
+          showPlaybackCompletionToast(context.getString(R.string.player_completion_home_toast))
           delay(CompletionActionDelayMs)
           if (completionActionToken == actionToken && completionReported) {
-            startPlaybackRequest(nextRequest, clearMetadata = false)
+            cancelPlaybackCompletionToast()
+            exitPlayer()
           }
-          return@launch
         }
-      }
-
-      if (autoPlayRelatedVideo) {
-        val relatedVideo = runCatching {
-          videoRepository.getRelatedVideos(displayRequest.bvid)
-            .firstOrNull { video -> !video.bvid.equals(displayRequest.bvid, ignoreCase = true) }
-        }.getOrNull()
-        if (completionActionToken != actionToken || !completionReported) return@launch
-        if (relatedVideo != null) {
-          showPlaybackCompletionToast(
-            context.getString(R.string.player_completion_related_toast, textConverter.convert(relatedVideo.title)),
-          )
-          delay(CompletionActionDelayMs)
-          if (completionActionToken == actionToken && completionReported) {
-            startPlaybackRequest(relatedVideo.toPlaybackRequest(), clearMetadata = true)
-          }
-          return@launch
-        }
-      }
-
-      if (autoReturnHomeOnCompletion) {
-        showPlaybackCompletionToast(context.getString(R.string.player_completion_home_toast))
-        delay(CompletionActionDelayMs)
-        if (completionActionToken == actionToken && completionReported) {
-          cancelPlaybackCompletionToast()
-          exitPlayer()
+      } finally {
+        if (completionActionToken == actionToken) {
+          completionActionJob = null
         }
       }
     }
@@ -701,8 +737,8 @@ fun PlayerScreen(
     completionReported = true
     val completedDurationMs = maxDurationMs()
     if (completedDurationMs > 0L) {
-      positionMs = completedDurationMs
-      durationMs = completedDurationMs
+      playbackPositionState.longValue = completedDurationMs
+      playbackDurationState.longValue = completedDurationMs
     }
     controlsVisible = true
     playbackPaused = true
@@ -753,7 +789,7 @@ fun PlayerScreen(
         val quality = info.qualities.getOrNull(focusedPanelIndex) ?: return
         selectedQuality = quality
         activeRequest = activeRequest.copy(
-          startPositionMs = player.currentPosition.takeIf { it > 0L } ?: positionMs,
+          startPositionMs = player.currentPosition.takeIf { it > 0L } ?: playbackPositionState.longValue,
           preferredQualityId = quality.id,
         )
       }
@@ -935,13 +971,12 @@ fun PlayerScreen(
 
   LaunchedEffect(activeRequest, playbackCodecPreference, playbackQualityPreference, retryKey) {
     playerState = PlayerScreenState.Loading
-    completionActionToken += 1L
-    cancelPlaybackCompletionToast()
+    cancelPendingCompletionAction()
     completionReported = false
     previewPositionMs = null
-    positionMs = 0L
-    durationMs = 0L
-    bufferedPercentage = 0L
+    playbackPositionState.longValue = 0L
+    playbackDurationState.longValue = 0L
+    playbackBufferedPercentageState.longValue = 0L
     playbackPaused = false
     currentCodecText = ""
     danmakuEntries = emptyList()
@@ -1009,7 +1044,7 @@ fun PlayerScreen(
         player.setPlaybackSpeed(playbackSpeed)
         if (startPositionMs > 0L) {
           player.seekTo(startPositionMs)
-          positionMs = startPositionMs
+          playbackPositionState.longValue = startPositionMs
           danmakuSyncToken += 1L
         }
         player.playWhenReady = true
@@ -1023,14 +1058,64 @@ fun PlayerScreen(
     }
   }
 
+  val shouldPollOnlineCount = playerState is PlayerScreenState.Ready &&
+    playerActuallyPlaying &&
+    previewPositionMs == null &&
+    !completionReported
+  val shouldPollOnlineCountState = rememberUpdatedState(shouldPollOnlineCount)
+  val displayRequestState = rememberUpdatedState(displayRequest)
+
   LaunchedEffect(player, playerState) {
     while (isActive) {
+      val nowMs = SystemClock.elapsedRealtime()
       val currentPositionMs = player.currentPosition.takeIf { it >= 0L } ?: 0L
-      positionMs = currentPositionMs
-      durationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: durationMs
-      bufferedPercentage = player.bufferedPercentage.toLong()
+      playbackPositionState.longValue = currentPositionMs
+      playbackDurationState.longValue = player.duration.takeIf { it != C.TIME_UNSET }
+        ?: playbackDurationState.longValue
+      playbackBufferedPercentageState.longValue = player.bufferedPercentage.toLong()
       currentCodecText = player.videoFormat?.codecs?.codecLabelFromCodecs()
         ?: (playerState as? PlayerScreenState.Ready)?.info?.videoTracks?.firstOrNull()?.codecLabel().orEmpty()
+      if (showClockState.value) {
+        val nextClockMinuteKey = currentClockMinuteKey()
+        if (clockMinuteKey != nextClockMinuteKey) {
+          clockMinuteKey = nextClockMinuteKey
+          clockText = currentClockText()
+        }
+      }
+      val onlineRequest = displayRequestState.value
+      val canPollOnlineCount = shouldPollOnlineCountState.value &&
+        lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+        onlineRequest.aid > 0L &&
+        onlineRequest.cid > 0L
+      if (!canPollOnlineCount) {
+        resetOnlineCountPolling()
+      } else if (nowMs >= nextOnlineCountRefreshAtMs && onlineCountRequestJob?.isActive != true) {
+        val aid = onlineRequest.aid
+        val cid = onlineRequest.cid
+        val requestToken = ++onlineCountRequestToken
+        nextOnlineCountRefreshAtMs = nowMs + OnlineCountRefreshMs
+        onlineCountRequestJob = coroutineScope.launch {
+          try {
+            val countText = runCatching {
+              playbackRepository.getOnlineCount(aid, cid).orEmpty()
+            }.getOrDefault("")
+            val currentRequest = displayRequestState.value
+            if (
+              onlineCountRequestToken == requestToken &&
+              shouldPollOnlineCountState.value &&
+              lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+              currentRequest.aid == aid &&
+              currentRequest.cid == cid
+            ) {
+              onlineCountText = countText
+            }
+          } finally {
+            if (onlineCountRequestToken == requestToken) {
+              onlineCountRequestJob = null
+            }
+          }
+        }
+      }
       if (playerState is PlayerScreenState.Ready) {
         handleAirJumpPosition(currentPositionMs)
       }
@@ -1049,19 +1134,6 @@ fun PlayerScreen(
     airJumpSegments = runCatching {
       playbackRepository.getAirJumpSegments(displayRequest.bvid)
     }.getOrDefault(emptyList())
-  }
-
-  LaunchedEffect(displayRequest.aid, displayRequest.cid) {
-    onlineCountText = ""
-    if (displayRequest.aid <= 0L || displayRequest.cid <= 0L) {
-      return@LaunchedEffect
-    }
-    while (isActive) {
-      onlineCountText = runCatching {
-        playbackRepository.getOnlineCount(displayRequest.aid, displayRequest.cid).orEmpty()
-      }.getOrDefault("")
-      delay(OnlineCountRefreshMs)
-    }
   }
 
   LaunchedEffect(danmakuSettings.enabled, displayRequest.cid) {
@@ -1091,12 +1163,13 @@ fun PlayerScreen(
     }.getOrNull()
   }
 
-  LaunchedEffect(seekPreviewSpritesEnabled, videoshotData?.images, previewPositionMs, durationMs) {
+  LaunchedEffect(seekPreviewSpritesEnabled, videoshotData?.images, previewPositionMs, playbackDurationState.longValue) {
     val data = videoshotData ?: return@LaunchedEffect
     if (!seekPreviewSpritesEnabled) return@LaunchedEffect
+    val currentDurationMs = playbackDurationState.longValue
 
     val targetUrls = buildList {
-      data.frameAt(previewPositionMs ?: positionMs, durationMs)?.imageUrl?.let(::add)
+      data.frameAt(previewPositionMs ?: playbackPositionState.longValue, currentDurationMs)?.imageUrl?.let(::add)
       data.images.take(VideoshotPreloadImageCount).forEach(::add)
     }
       .filter { url -> url.isNotBlank() && url !in videoshotSprites }
@@ -1106,7 +1179,7 @@ fun PlayerScreen(
       val image = runCatching {
         playbackRepository.getVideoshotImageBytes(url)?.decodeImageBitmapOrNull()
       }.getOrNull() ?: return@forEach
-      videoshotSprites = videoshotSprites + (url to image)
+      videoshotSprites = videoshotSprites.withBoundedSprite(url, image)
     }
   }
 
@@ -1296,7 +1369,7 @@ fun PlayerScreen(
         PlayerDanmakuLayer(
           entries = danmakuEntries,
           settings = danmakuSettings,
-          positionState = danmakuPositionState,
+          positionState = playbackPositionState,
           syncToken = danmakuSyncToken,
           isPlaying = playerActuallyPlaying && previewPositionMs == null && !completionReported,
           playbackSpeed = playbackSpeed,
@@ -1327,24 +1400,27 @@ fun PlayerScreen(
           focusedPanelIndex = focusedPanelIndex,
           playbackSpeed = playbackSpeed,
           danmakuSettings = danmakuSettings,
-          positionMs = positionMs,
-          durationMs = durationMs,
-          bufferedPercentage = bufferedPercentage,
+          positionState = playbackPositionState,
+          durationState = playbackDurationState,
+          bufferedPercentageState = playbackBufferedPercentageState,
           airJumpSegments = airJumpSegments,
           previewPositionMs = previewPositionMs,
           showClock = showClock,
+          clockText = clockText,
+          showMiniProgressBar = showMiniProgressBar,
         )
       }
     }
     if (showClock && playerState !is PlayerScreenState.Ready) {
       ClockOverlay(
+        clockText = clockText,
         modifier = Modifier
           .align(Alignment.TopEnd)
           .padding(
             top = BiliSizing.ClockOverlayTopPadding,
             end = BiliSizing.ClockOverlayEndPadding,
           ),
-      )
+        )
     }
   }
 }
@@ -1536,6 +1612,18 @@ private fun Map<String, List<VideoSummary>>.withBoundedEntry(
     .associate { entry -> entry.key to entry.value }
 }
 
+private fun Map<String, ImageBitmap>.withBoundedSprite(
+  key: String,
+  image: ImageBitmap,
+): Map<String, ImageBitmap> {
+  val nextEntries = (this - key).toMutableMap()
+  nextEntries[key] = image
+  return nextEntries.entries
+    .toList()
+    .takeLast(MaxVideoshotSpriteCacheEntries)
+    .associate { entry -> entry.key to entry.value }
+}
+
 private tailrec fun Context.findActivity(): Activity? {
   return when (this) {
     is Activity -> this
@@ -1564,9 +1652,11 @@ private sealed interface PlayerScreenState {
 private const val SeekStepMs = 10_000L
 private const val OnlineCountRefreshMs = 60_000L
 private const val VideoshotPreloadImageCount = 2
+private const val MaxVideoshotSpriteCacheEntries = 6
 private const val ExitConfirmWindowMs = 3_000L
 private const val CompletedProgressSeconds = -1
 private const val CompletionActionDelayMs = 3_000L
+private const val PlayerWakeLockTimeoutMs = 10 * 60 * 1000L
 private const val AirJumpWarningLeadMs = 3_500L
 private const val AirJumpCompletionToastSuppressMs = 1_500L
 private const val AirJumpRewindResetThresholdMs = 2_000L

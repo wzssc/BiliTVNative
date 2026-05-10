@@ -1,12 +1,38 @@
+# Gradle / Kotlin build state
 .gradle/
 .kotlin/
 build/
 app/build/
+
+# Local Android SDK / IDE state
 local.properties
 *.iml
 .idea/
+.vscode/
+
+# Native build intermediates
 .cxx/
 .externalNativeBuild/
+
+# Local debug traces and screenshots
+.codex-traces/
+captures/
+
+# Build artifacts
 *.apk
 *.aab
 *.ap_
+*.apks
+*.aar
+
+# Local signing material
+*.jks
+*.keystore
+
+# Logs / crash dumps
+*.log
+*.hprof
+
+# OS temporary files
+.DS_Store
+Thumbs.db

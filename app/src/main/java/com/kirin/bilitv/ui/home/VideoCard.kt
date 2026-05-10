@@ -33,10 +33,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -56,6 +60,7 @@ import com.kirin.bilitv.core.model.viewAtText
 import com.kirin.bilitv.core.model.watchProgressRatio
 import com.kirin.bilitv.core.model.watchProgressText
 import com.kirin.bilitv.ui.focus.BiliFocusableSurface
+import com.kirin.bilitv.ui.glass.LocalLiquidGlassBackdrop
 import com.kirin.bilitv.ui.i18n.convertChineseText
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
@@ -88,7 +93,19 @@ fun VideoCard(
   val homeColors = LocalHomeColors.current
   val focusEffectsEnabled = performancePolicy.motionEnabled
   val cinematicEffectsEnabled = performancePolicy.cinematicVisualEffectsEnabled
-  val cardInfoBackground = homeColors.cardInfoSurface
+  val liquidGlassBackdrop = LocalLiquidGlassBackdrop.current
+  val liquidGlassCardsEnabled = cinematicEffectsEnabled && performancePolicy.liquidGlassCardsEnabled
+  val liquidGlassActive = liquidGlassCardsEnabled && liquidGlassBackdrop != null
+  val cardSurface = if (liquidGlassActive) {
+    homeColors.cardSurface.copy(alpha = BiliFocus.LiquidGlassCardSurfaceAlpha)
+  } else {
+    homeColors.cardSurface
+  }
+  val cardInfoBackground = if (liquidGlassActive) {
+    homeColors.cardInfoSurface.copy(alpha = BiliFocus.LiquidGlassCardInfoSurfaceAlpha)
+  } else {
+    homeColors.cardInfoSurface
+  }
   val title = convertChineseText(video.title)
   val titleColor = if (focusEffectsEnabled) {
     animateColorAsState(
@@ -101,38 +118,79 @@ fun VideoCard(
   }
 
   BiliFocusableSurface(
-    modifier = modifier.fillMaxWidth(),
+    modifier = modifier
+      .fillMaxWidth()
+      .then(
+        if (liquidGlassActive) {
+          Modifier.padding(BiliFocus.LiquidGlassCardFocusPadding)
+        } else {
+          Modifier
+        },
+      ),
     scaleOnFocus = focusEffectsEnabled,
     shadowOnFocus = false,
-    focusedScale = BiliFocus.CardScale,
-    focusedBorderColor = if (cinematicEffectsEnabled) {
-      homeColors.textPrimary.copy(alpha = BiliFocus.CinematicCardFocusedBorderAlpha)
+    focusedScale = if (cinematicEffectsEnabled) {
+      BiliFocus.CinematicCardScale
+    } else {
+      BiliFocus.CardScale
+    },
+    focusedBorderColor = if (liquidGlassActive) {
+      BiliColors.Transparent
+    } else if (cinematicEffectsEnabled) {
+      BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassBorderAlpha)
     } else {
       null
     },
-    restingBorderColor = if (cinematicEffectsEnabled) {
+    restingBorderColor = if (liquidGlassActive) {
+      BiliColors.Transparent
+    } else if (cinematicEffectsEnabled) {
       homeColors.textPrimary.copy(alpha = BiliFocus.CinematicCardRestingBorderAlpha)
     } else {
       null
     },
     focusedBorderWidth = if (cinematicEffectsEnabled) {
-      BiliFocus.RestingBorderWidth
+      if (liquidGlassActive) {
+        BiliFocus.LiquidGlassCardBorderWidth
+      } else {
+        BiliFocus.RestingBorderWidth
+      }
     } else {
       BiliFocus.BorderWidth
     },
+    restingBorderWidth = if (liquidGlassActive) {
+      BiliFocus.LiquidGlassCardBorderWidth
+    } else if (cinematicEffectsEnabled) {
+      BiliFocus.LiquidGlassCardBorderWidth
+    } else {
+      BiliFocus.RestingBorderWidth
+    },
+    focusedLift = if (cinematicEffectsEnabled) {
+      BiliFocus.CinematicCardLift
+    } else {
+      BiliFocus.RestingLift
+    },
     restingBackgroundColor = if (cinematicEffectsEnabled) {
-      homeColors.cardSurface
+      cardSurface
     } else {
       null
     },
     focusedBackgroundColor = if (cinematicEffectsEnabled) {
-      homeColors.cardFocusedSurface
+      cardSurface
     } else {
       null
     },
     onClick = onClick,
     onFocused = onFocused,
     onFocusChanged = { focused = it },
+    focusedForeground = when {
+      cinematicEffectsEnabled && liquidGlassActive -> {
+        { drawLiquidGlassCardFocusedOutline() }
+      }
+      cinematicEffectsEnabled -> {
+        { drawCinematicCardGlassBorder() }
+      }
+      else -> null
+    },
   ) {
     Box {
       Column {
@@ -189,6 +247,81 @@ fun VideoCard(
       }
     }
   }
+}
+
+private fun DrawScope.drawCinematicCardGlassBorder() {
+  val radius = BiliRadius.Card.toPx()
+  val outerWidth = BiliFocus.CinematicCardGlassOuterWidth.toPx()
+  val outerInset = outerWidth / 2f
+  drawRoundRect(
+    brush = Brush.linearGradient(
+      colors = listOf(
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassOuterSheenAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassOuterAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassOuterSheenAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassOuterAlpha),
+      ),
+      start = Offset.Zero,
+      end = Offset(size.width, size.height),
+    ),
+    topLeft = Offset(outerInset, outerInset),
+    size = Size(
+      width = (size.width - outerWidth).coerceAtLeast(0f),
+      height = (size.height - outerWidth).coerceAtLeast(0f),
+    ),
+    cornerRadius = CornerRadius(radius, radius),
+    style = Stroke(width = outerWidth),
+  )
+
+  val innerWidth = BiliFocus.CinematicCardGlassInnerWidth.toPx()
+  val innerInset = BiliFocus.CinematicCardGlassInnerInset.toPx() + innerWidth / 2f
+  val innerRadius = (radius - innerInset).coerceAtLeast(0f)
+  drawRoundRect(
+    brush = Brush.linearGradient(
+      colors = listOf(
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassInnerSheenAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassInnerAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassInnerSheenAlpha),
+        BiliColors.TextPrimary.copy(alpha = BiliFocus.CinematicCardGlassInnerAlpha),
+      ),
+      start = Offset.Zero,
+      end = Offset(size.width, size.height),
+    ),
+    topLeft = Offset(innerInset, innerInset),
+    size = Size(
+      width = (size.width - innerInset * 2f).coerceAtLeast(0f),
+      height = (size.height - innerInset * 2f).coerceAtLeast(0f),
+    ),
+    cornerRadius = CornerRadius(innerRadius, innerRadius),
+    style = Stroke(width = innerWidth),
+  )
+}
+
+private fun DrawScope.drawLiquidGlassCardFocusedOutline() {
+  val outlineOutset = BiliFocus.LiquidGlassCardFocusPadding.toPx()
+  val bandWidth = outlineOutset
+  val bandInset = bandWidth / 2f
+  val radius = BiliRadius.Card.toPx() + bandInset
+  val borderBrush = Brush.linearGradient(
+    colors = listOf(
+      BiliColors.TextPrimary.copy(alpha = BiliFocus.LiquidGlassCardFocusedOuterAlpha),
+      BiliColors.TextPrimary.copy(alpha = BiliFocus.LiquidGlassCardFocusedOuterDimAlpha),
+      BiliColors.TextPrimary.copy(alpha = BiliFocus.LiquidGlassCardFocusedOuterAlpha),
+      BiliColors.TextPrimary.copy(alpha = BiliFocus.LiquidGlassCardFocusedOuterDimAlpha),
+    ),
+    start = Offset(-outlineOutset, -outlineOutset),
+    end = Offset(size.width + outlineOutset, size.height + outlineOutset),
+  )
+  drawRoundRect(
+    brush = borderBrush,
+    topLeft = Offset(-bandInset, -bandInset),
+    size = Size(
+      width = size.width + bandWidth,
+      height = size.height + bandWidth,
+    ),
+    cornerRadius = CornerRadius(radius, radius),
+    style = Stroke(width = bandWidth),
+  )
 }
 
 @Composable
@@ -517,7 +650,7 @@ private fun CinematicCoverPolish(
         Brush.verticalGradient(
           colors = listOf(
             BiliColors.Transparent,
-            homeColors.accent.copy(alpha = BiliFocus.CinematicFocusGlowAlpha * BiliFocus.CinematicCoverGlowAlphaMultiplier),
+            homeColors.textPrimary.copy(alpha = BiliFocus.CinematicFocusGlowAlpha * BiliFocus.CinematicCoverGlowAlphaMultiplier),
             BiliColors.VideoBlack.copy(alpha = BiliFocus.CinematicCoverVignetteAlpha),
           ),
         ),

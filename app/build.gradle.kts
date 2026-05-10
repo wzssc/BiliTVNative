@@ -1,6 +1,5 @@
 plugins {
   alias(libs.plugins.android.application)
-  alias(libs.plugins.kotlin.android)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.kotlin.serialization)
 }
@@ -83,6 +82,7 @@ dependencies {
   implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
+  implementation(libs.backdrop)
   implementation(libs.compose.foundation)
   implementation(libs.compose.material3)
   implementation(libs.compose.ui)

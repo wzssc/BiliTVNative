@@ -43,8 +43,10 @@ data class AppSettings(
   val autoPlayRelatedVideo: Boolean = false,
   val autoReturnHomeOnCompletion: Boolean = false,
   val showClock: Boolean = true,
+  val showMiniProgressBar: Boolean = true,
   val autoConfirmOnFocus: Boolean = false,
   val autoRefreshOnSwitch: Boolean = false,
+  val liquidGlassCardsEnabled: Boolean = false,
   val enabledHomeSections: Set<HomeSection> = HomeSection.DefaultOrder.toSet(),
 ) {
   val lowSpecMode: Boolean
@@ -68,6 +70,7 @@ data class AppPerformancePolicy(
   val focusedCoverBlurEnabled: Boolean,
   val refinedVisualEffectsEnabled: Boolean,
   val cinematicVisualEffectsEnabled: Boolean,
+  val liquidGlassCardsEnabled: Boolean,
 ) {
   companion object {
     val Balanced = AppPerformancePolicy(
@@ -87,6 +90,7 @@ data class AppPerformancePolicy(
       focusedCoverBlurEnabled = false,
       refinedVisualEffectsEnabled = true,
       cinematicVisualEffectsEnabled = false,
+      liquidGlassCardsEnabled = false,
     )
 
     val Refined = AppPerformancePolicy(
@@ -106,6 +110,7 @@ data class AppPerformancePolicy(
       focusedCoverBlurEnabled = true,
       refinedVisualEffectsEnabled = true,
       cinematicVisualEffectsEnabled = true,
+      liquidGlassCardsEnabled = false,
     )
 
     val LowSpec = AppPerformancePolicy(
@@ -125,6 +130,7 @@ data class AppPerformancePolicy(
       focusedCoverBlurEnabled = false,
       refinedVisualEffectsEnabled = false,
       cinematicVisualEffectsEnabled = false,
+      liquidGlassCardsEnabled = false,
     )
 
     private val ConstrainedTv = Balanced.copy(
@@ -154,13 +160,13 @@ data class AppPerformancePolicy(
         return when (settings.visualPerformanceMode) {
           AppVisualPerformanceMode.Smooth -> LowSpec
           AppVisualPerformanceMode.Balanced -> ConstrainedTv.copy(visualPerformanceMode = AppVisualPerformanceMode.Balanced)
-          AppVisualPerformanceMode.Refined -> Refined
+          AppVisualPerformanceMode.Refined -> Refined.copy(liquidGlassCardsEnabled = settings.liquidGlassCardsEnabled)
         }
       }
       return when (settings.visualPerformanceMode) {
         AppVisualPerformanceMode.Smooth -> LowSpec
         AppVisualPerformanceMode.Balanced -> Balanced
-        AppVisualPerformanceMode.Refined -> Refined
+        AppVisualPerformanceMode.Refined -> Refined.copy(liquidGlassCardsEnabled = settings.liquidGlassCardsEnabled)
       }
     }
   }

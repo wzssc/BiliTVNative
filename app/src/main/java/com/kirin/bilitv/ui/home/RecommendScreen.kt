@@ -3,6 +3,7 @@ package com.kirin.bilitv.ui.home
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -10,16 +11,16 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyGridItemInfo
@@ -60,6 +61,7 @@ import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.core.network.VideoRepository
 import com.kirin.bilitv.ui.common.FeedStatusScreen
 import com.kirin.bilitv.ui.common.VideoGridSkeleton
+import com.kirin.bilitv.ui.glass.biliLiquidGlassSurface
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
 import com.kirin.bilitv.ui.theme.BiliFocus
@@ -355,35 +357,64 @@ private fun RecommendHeader(
   onSectionSelected: (HomeSection) -> Unit,
   onSectionFocused: (HomeSection) -> Unit,
 ) {
-  LazyRow(
+  val homeColors = LocalHomeColors.current
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val capsuleShape = RoundedCornerShape(BiliRadius.Pill)
+  val liquidGlassEnabled = performancePolicy.cinematicVisualEffectsEnabled && performancePolicy.liquidGlassCardsEnabled
+  BoxWithConstraints(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(end = BiliSizing.HomeSectionClockReservedWidth)
-      .height(BiliSizing.HomeSectionTabHeight + BiliSpacing.Xs)
-      .padding(BiliSpacing.Xs),
-    horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Lg),
-    contentPadding = PaddingValues(horizontal = BiliSpacing.Xs),
+      .height(BiliSizing.HomeSectionCapsuleHeight),
+    contentAlignment = Alignment.Center,
   ) {
-    itemsIndexed(sections, key = { _, section -> section.key }) { index, section ->
-      HomeSectionTab(
-        section = section,
-        selected = section == selectedSection,
-        autoConfirmOnFocus = autoConfirmOnFocus || !isSectionLoaded(section),
-        modifier = if (section == selectedSection) {
-          Modifier.focusRequester(selectedSectionFocusRequester)
-        } else {
-          Modifier
-        },
-        onMoveLeftToNav = if (index == 0) onMoveLeftToNav else null,
-        onClick = {
-          onSectionSelected(section)
-        },
-        onFocused = {
-          if (autoConfirmOnFocus || shouldAutoRefreshOnFocus || !isSectionLoaded(section)) {
-            onSectionFocused(section)
-          }
-        },
-      )
+    val capsuleMaxWidth = maxWidth
+    val capsuleMinWidth = capsuleMaxWidth * homeSectionCapsuleMinWidthFraction(sections.size)
+    val capsuleArrangement = if (sections.size <= HomeSectionCapsuleSpreadMaxCount) {
+      Arrangement.SpaceEvenly
+    } else {
+      Arrangement.spacedBy(BiliSizing.HomeSectionCapsuleItemSpacing)
+    }
+    Row(
+      modifier = Modifier
+        .align(Alignment.Center)
+        .offset(y = -BiliSizing.HomeSectionCapsuleTopOffset)
+        .widthIn(min = capsuleMinWidth, max = capsuleMaxWidth)
+        .clip(capsuleShape)
+        .biliLiquidGlassSurface(
+          enabled = liquidGlassEnabled,
+          shape = capsuleShape,
+          surfaceColor = homeColors.glassSurface.copy(alpha = BiliFocus.HomeSectionCapsuleSurfaceAlpha),
+          borderColor = homeColors.textPrimary.copy(alpha = BiliFocus.HomeSectionCapsuleBorderAlpha),
+          borderWidth = BiliFocus.RestingBorderWidth,
+        )
+        .padding(
+          horizontal = BiliSizing.HomeSectionCapsuleHorizontalPadding,
+          vertical = BiliSizing.HomeSectionCapsuleVerticalPadding,
+        ),
+      horizontalArrangement = capsuleArrangement,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      sections.forEachIndexed { index, section ->
+        HomeSectionTab(
+          section = section,
+          selected = section == selectedSection,
+          autoConfirmOnFocus = autoConfirmOnFocus || !isSectionLoaded(section),
+          modifier = if (section == selectedSection) {
+            Modifier.focusRequester(selectedSectionFocusRequester)
+          } else {
+            Modifier
+          },
+          onMoveLeftToNav = if (index == 0) onMoveLeftToNav else null,
+          onClick = {
+            onSectionSelected(section)
+          },
+          onFocused = {
+            if (autoConfirmOnFocus || shouldAutoRefreshOnFocus || !isSectionLoaded(section)) {
+              onSectionFocused(section)
+            }
+          },
+        )
+      }
     }
   }
 }
@@ -442,6 +473,13 @@ private fun HomeSectionTab(
       .height(BiliSizing.HomeSectionTabHeight)
       .widthIn(min = BiliSizing.HomeSectionTabCompactMinWidth)
       .clip(shape)
+      .background(
+        if (focused) {
+          homeColors.textPrimary.copy(alpha = BiliFocus.HomeSectionTabFocusedSurfaceAlpha)
+        } else {
+          BiliColors.Transparent
+        },
+      )
       .border(BorderStroke(borderWidth, borderColor), shape)
       .onFocusChanged { focusState ->
         focused = focusState.isFocused
@@ -516,8 +554,22 @@ private fun RecommendGrid(
         selectedSectionFocusRequester.requestFocus()
       }.isSuccess
     },
+    topPadding = BiliSizing.HomeVideoGridTopPadding + BiliSizing.HomeVideoGridTopBleed,
+    topBleed = BiliSizing.HomeVideoGridTopBleed,
     onVideoSelected = onVideoSelected,
   )
+}
+
+private const val HomeSectionCapsuleSpreadMaxCount = 6
+
+private fun homeSectionCapsuleMinWidthFraction(sectionCount: Int): Float = when (sectionCount) {
+  0, 1 -> 0.24f
+  2 -> 0.34f
+  3 -> 0.44f
+  4 -> 0.54f
+  5 -> 0.60f
+  6 -> 0.66f
+  else -> 0f
 }
 
 private suspend fun LazyGridState.scrollItemIntoStablePosition(

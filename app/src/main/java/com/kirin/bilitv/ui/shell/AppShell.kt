@@ -84,10 +84,10 @@ import com.kirin.bilitv.core.model.shouldAdvanceToNextHistoryEpisode
 import com.kirin.bilitv.core.settings.AppPerformancePolicy
 import com.kirin.bilitv.core.settings.AppSettings
 import com.kirin.bilitv.core.settings.AppSettingsStore
+import com.kirin.bilitv.core.settings.supportsLiquidGlassCards
 import com.kirin.bilitv.core.storage.SearchHistoryStore
 import com.kirin.bilitv.core.storage.SessionStore
 import com.kirin.bilitv.core.storage.UserSession
-import com.kirin.bilitv.ui.common.ClockOverlay
 import com.kirin.bilitv.ui.feed.DynamicFeedScreen
 import com.kirin.bilitv.ui.feed.DynamicFeedUiState
 import com.kirin.bilitv.ui.feed.HistoryFeedScreen
@@ -95,12 +95,15 @@ import com.kirin.bilitv.ui.feed.HistoryFeedUiState
 import com.kirin.bilitv.ui.focus.BiliFocusableSurface
 import com.kirin.bilitv.ui.home.RecommendScreen
 import com.kirin.bilitv.ui.home.RecommendUiState
+import com.kirin.bilitv.ui.glass.LocalLiquidGlassBackdrop
+import com.kirin.bilitv.ui.glass.biliLiquidGlassSurface
 import com.kirin.bilitv.ui.i18n.LocalChineseTextConverter
 import com.kirin.bilitv.ui.i18n.convertChineseText
 import com.kirin.bilitv.ui.i18n.localizedContext
 import com.kirin.bilitv.ui.login.AccountScreen
 import com.kirin.bilitv.ui.player.PlayerScreen
 import com.kirin.bilitv.ui.search.SearchScreen
+import com.kirin.bilitv.ui.search.SearchUiState
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.settings.SettingsScreen
 import com.kirin.bilitv.ui.theme.BiliColors
@@ -113,6 +116,8 @@ import com.kirin.bilitv.ui.theme.BiliTypography
 import com.kirin.bilitv.ui.theme.HomeColorScheme
 import com.kirin.bilitv.ui.theme.HomeThemes
 import com.kirin.bilitv.ui.theme.LocalHomeColors
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -170,8 +175,9 @@ fun BiliTvApp(
   val codecCapability = remember(codecCapabilityProbe) { codecCapabilityProbe.probe() }
   val autoConfirmOnFocus = settings.autoConfirmOnFocus
   val autoRefreshOnSwitch = settings.autoConfirmOnFocus && settings.autoRefreshOnSwitch
+  val liquidGlassCardsSupported = remember { supportsLiquidGlassCards() }
   val constrainedTvUiDevice = remember { isConstrainedTvUiDevice() }
-  val performancePolicy = remember(settings.visualPerformanceMode, constrainedTvUiDevice) {
+  val performancePolicy = remember(settings.visualPerformanceMode, settings.liquidGlassCardsEnabled, constrainedTvUiDevice) {
     AppPerformancePolicy.fromSettings(
       settings = settings,
       constrainedTvUi = constrainedTvUiDevice,
@@ -179,6 +185,10 @@ fun BiliTvApp(
   }
   val homeColors = remember(settings.homeThemeVariant) {
     HomeThemes.fromVariant(settings.homeThemeVariant)
+  }
+  val liquidGlassBackdrop = rememberLayerBackdrop()
+  val activeLiquidGlassBackdrop = liquidGlassBackdrop.takeIf {
+    performancePolicy.liquidGlassCardsEnabled && liquidGlassCardsSupported
   }
   val effectivePlaybackCodecPreference = if (settings.lowSpecMode) {
     PlaybackCodecPreference.H264
@@ -201,6 +211,7 @@ fun BiliTvApp(
   val recommendUiState = remember { RecommendUiState() }
   val dynamicFeedState = remember { DynamicFeedUiState() }
   val historyFeedState = remember { HistoryFeedUiState() }
+  val searchUiState = remember { SearchUiState() }
   var initialHomeFocusPending by remember { mutableStateOf(true) }
   var recommendManualRefreshKey by rememberSaveable { mutableStateOf(0) }
   var dynamicManualRefreshKey by rememberSaveable { mutableStateOf(0) }
@@ -299,6 +310,9 @@ fun BiliTvApp(
   }
 
   fun selectDestination(destination: AppDestination) {
+    if (selectedDestination == AppDestination.Search && destination != AppDestination.Search) {
+      searchUiState.clear()
+    }
     accountSelected = false
     val destinationChanged = selectedDestination != destination
     if (!destinationChanged) {
@@ -373,6 +387,7 @@ fun BiliTvApp(
     LocalBiliPerformancePolicy provides performancePolicy,
     LocalChineseTextConverter provides textConverter,
     LocalHomeColors provides homeColors,
+    LocalLiquidGlassBackdrop provides activeLiquidGlassBackdrop,
   ) {
     val activePlaybackRequest = playbackRequest
     var visiblePlaybackRequest by remember { mutableStateOf<PlaybackRequest?>(null) }
@@ -436,11 +451,23 @@ fun BiliTvApp(
     Box(modifier = Modifier.fillMaxSize()) {
       if (visiblePlaybackRequest == null) {
         Box(modifier = Modifier.fillMaxSize()) {
-        HomeAppBackground(
-          colors = homeColors,
-          refinedVisualsEnabled = performancePolicy.refinedVisualEffectsEnabled,
-          cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled,
-        )
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .then(
+              if (activeLiquidGlassBackdrop != null) {
+                Modifier.layerBackdrop(liquidGlassBackdrop)
+              } else {
+                Modifier
+              },
+            ),
+        ) {
+          HomeAppBackground(
+            colors = homeColors,
+            refinedVisualsEnabled = performancePolicy.refinedVisualEffectsEnabled,
+            cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled,
+          )
+        }
         BackHandler(enabled = activePlaybackRequest == null) {
           val now = SystemClock.elapsedRealtime()
           if (now - lastAppExitBackPressMs <= ExitConfirmWindowMs) {
@@ -522,6 +549,7 @@ fun BiliTvApp(
                 AppDestination.Search -> SearchScreen(
                   videoRepository = videoRepository,
                   searchHistoryStore = searchHistoryStore,
+                  uiState = searchUiState,
                   firstItemFocusRequester = searchFocusRequester,
                   restoreFocusRequestKey = restoreFocusRequestKeyFor(AppDestination.Search),
                   onRestoreFocusHandled = { key -> clearFocusRestoreRequest(AppDestination.Search, key) },
@@ -593,6 +621,12 @@ fun BiliTvApp(
                       appSettingsStore.setVisualPerformanceMode(mode)
                     }
                   },
+                  liquidGlassCardsSupported = liquidGlassCardsSupported,
+                  onLiquidGlassCardsEnabledChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setLiquidGlassCardsEnabled(enabled)
+                    }
+                  },
                   onHomeThemeVariantChange = { variant ->
                     coroutineScope.launch {
                       appSettingsStore.setHomeThemeVariant(variant)
@@ -659,6 +693,11 @@ fun BiliTvApp(
                       appSettingsStore.setShowClock(enabled)
                     }
                   },
+                  onShowMiniProgressBarChange = { enabled ->
+                    coroutineScope.launch {
+                      appSettingsStore.setShowMiniProgressBar(enabled)
+                    }
+                  },
                   onAutoConfirmOnFocusChange = { enabled ->
                     coroutineScope.launch {
                       appSettingsStore.setAutoConfirmOnFocus(enabled)
@@ -678,16 +717,6 @@ fun BiliTvApp(
               }
             }
           }
-        }
-        if (settings.showClock) {
-          ClockOverlay(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(
-                top = BiliSizing.ClockOverlayTopPadding,
-                end = BiliSizing.ClockOverlayEndPadding,
-            ),
-          )
         }
       }
       }
@@ -713,6 +742,7 @@ fun BiliTvApp(
             autoPlayRelatedVideo = settings.autoPlayRelatedVideo,
             autoReturnHomeOnCompletion = settings.autoReturnHomeOnCompletion,
             showClock = settings.showClock,
+            showMiniProgressBar = settings.showMiniProgressBar,
             onBack = {
               playbackFocusRestoreDestination = selectedDestination
               playbackRequest = null
@@ -870,10 +900,12 @@ private fun AppSidebar(
   val homeColors = LocalHomeColors.current
   val performancePolicy = LocalBiliPerformancePolicy.current
   val cinematicVisualsEnabled = performancePolicy.cinematicVisualEffectsEnabled
+  val liquidGlassBackdrop = LocalLiquidGlassBackdrop.current
+  val liquidGlassEnabled = cinematicVisualsEnabled && performancePolicy.liquidGlassCardsEnabled && liquidGlassBackdrop != null
   val sidebarShape = RoundedCornerShape(
     topStart = BiliRadius.Sidebar,
-    topEnd = BiliRadius.None,
-    bottomEnd = BiliRadius.None,
+    topEnd = BiliRadius.Sidebar,
+    bottomEnd = BiliRadius.Sidebar,
     bottomStart = BiliRadius.Sidebar,
   )
   val sidebarBackground = if (cinematicVisualsEnabled) {
@@ -903,11 +935,23 @@ private fun AppSidebar(
       .width(BiliSizing.SidebarWidth)
       .fillMaxHeight()
       .clip(sidebarShape)
-      .background(sidebarBackground)
-      .border(BorderStroke(BiliFocus.RestingBorderWidth, sidebarBorder), sidebarShape)
-      .padding(horizontal = BiliSpacing.Lg, vertical = BiliSizing.ContentPadding),
+      .then(
+        if (liquidGlassEnabled) {
+          Modifier.biliLiquidGlassSurface(
+            enabled = true,
+            shape = sidebarShape,
+            surfaceColor = homeColors.sidebarSurface.copy(alpha = BiliFocus.HomeSidebarLiquidGlassSurfaceAlpha),
+            borderColor = sidebarBorder,
+            borderWidth = BiliFocus.RestingBorderWidth,
+          )
+        } else {
+          Modifier
+            .background(sidebarBackground)
+            .border(BorderStroke(BiliFocus.RestingBorderWidth, sidebarBorder), sidebarShape)
+        },
+      )
+      .padding(horizontal = BiliSpacing.Md, vertical = BiliSizing.ContentPadding),
     horizontalAlignment = Alignment.CenterHorizontally,
-    verticalArrangement = Arrangement.spacedBy(BiliSpacing.Lg),
   ) {
     if (userSession.isLoggedIn) {
       AccountStatusAvatar(userSession = userSession)
@@ -923,20 +967,26 @@ private fun AppSidebar(
         },
       )
     }
-    Spacer(modifier = Modifier.height(BiliSpacing.Sm))
-    AppDestination.entries.forEach { destination ->
-      AppNavItem(
-        destination = destination,
-        selected = !accountSelected && selectedDestination == destination,
-        autoConfirmOnFocus = shouldAutoConfirmDestination(destination),
-        modifier = Modifier.focusRequester(navFocusRequesters.getValue(destination)),
-        onClick = {
-          onDestinationSelected(destination)
-        },
-        onMoveRight = {
-          onMoveRight(destination)
-        },
-      )
+    Spacer(modifier = Modifier.height(BiliSizing.SidebarNavGroupTopPadding))
+    Column(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(BiliSizing.SidebarNavGroupSpacing),
+    ) {
+      AppDestination.entries.forEach { destination ->
+        AppNavItem(
+          destination = destination,
+          selected = !accountSelected && selectedDestination == destination,
+          autoConfirmOnFocus = shouldAutoConfirmDestination(destination),
+          modifier = Modifier.focusRequester(navFocusRequesters.getValue(destination)),
+          onClick = {
+            onDestinationSelected(destination)
+          },
+          onMoveRight = {
+            onMoveRight(destination)
+          },
+        )
+      }
     }
     Spacer(modifier = Modifier.weight(1f))
   }

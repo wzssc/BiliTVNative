@@ -60,6 +60,7 @@ internal fun PlayerDanmakuLayer(
     }
     var danmakuView by remember { mutableStateOf<DanmakuView?>(null) }
     val latestIsPlaying by rememberUpdatedState(isPlaying)
+    val currentDanmakuView by rememberUpdatedState(danmakuView)
     val configKey = remember(settings, fontSizePx, viewportHeightPx, playbackSpeed, lowSpecMode) {
       DanmakuConfigKey(
         settings = settings,
@@ -79,7 +80,6 @@ internal fun PlayerDanmakuLayer(
           isFocusableInTouchMode = false
           importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
           setBackgroundColor(Color.TRANSPARENT)
-          setLayerType(View.LAYER_TYPE_HARDWARE, null)
           controller.config.debug.logLevel = Log.WARN
           danmakuView = this
         }
@@ -126,9 +126,10 @@ internal fun PlayerDanmakuLayer(
       }
     }
 
-    DisposableEffect(danmakuView) {
+    DisposableEffect(Unit) {
       onDispose {
-        danmakuView?.controller?.stop()
+        currentDanmakuView?.controller?.stop()
+        currentDanmakuView?.controller?.clear()
       }
     }
   }

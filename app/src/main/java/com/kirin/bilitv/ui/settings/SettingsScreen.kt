@@ -94,6 +94,8 @@ fun SettingsScreen(
   firstItemFocusRequester: FocusRequester,
   onMoveLeftToNav: () -> Boolean,
   onVisualPerformanceModeChange: (AppVisualPerformanceMode) -> Unit,
+  liquidGlassCardsSupported: Boolean,
+  onLiquidGlassCardsEnabledChange: (Boolean) -> Unit,
   onHomeThemeVariantChange: (HomeThemeVariant) -> Unit,
   onChineseTextVariantChange: (ChineseTextVariant) -> Unit,
   onClearCache: () -> Unit,
@@ -106,6 +108,7 @@ fun SettingsScreen(
   onAutoPlayRelatedVideoChange: (Boolean) -> Unit,
   onAutoReturnHomeOnCompletionChange: (Boolean) -> Unit,
   onShowClockChange: (Boolean) -> Unit,
+  onShowMiniProgressBarChange: (Boolean) -> Unit,
   onAutoConfirmOnFocusChange: (Boolean) -> Unit,
   onAutoRefreshOnSwitchChange: (Boolean) -> Unit,
   onHomeSectionEnabledChange: (HomeSection, Boolean) -> Unit,
@@ -132,9 +135,11 @@ fun SettingsScreen(
       SettingsItemAutoPlayRelatedVideo to FocusRequester(),
       SettingsItemAutoReturnHomeOnCompletion to FocusRequester(),
       SettingsItemShowClock to FocusRequester(),
+      SettingsItemShowMiniProgressBar to FocusRequester(),
       SettingsItemAutoConfirmOnFocus to FocusRequester(),
       SettingsItemAutoRefreshOnSwitch to FocusRequester(),
       SettingsItemVisualPerformanceMode to FocusRequester(),
+      SettingsItemLiquidGlassCards to FocusRequester(),
       SettingsItemHomeThemeVariant to FocusRequester(),
     )
   }
@@ -193,6 +198,8 @@ fun SettingsScreen(
         onMoveSettingFocus = ::moveSettingFocus,
         onMoveLeftToNav = onMoveLeftToNav,
         onVisualPerformanceModeChange = onVisualPerformanceModeChange,
+        liquidGlassCardsSupported = liquidGlassCardsSupported,
+        onLiquidGlassCardsEnabledChange = onLiquidGlassCardsEnabledChange,
         onHomeThemeVariantChange = onHomeThemeVariantChange,
         onChineseTextVariantChange = onChineseTextVariantChange,
         onClearCache = onClearCache,
@@ -205,6 +212,7 @@ fun SettingsScreen(
         onAutoPlayRelatedVideoChange = onAutoPlayRelatedVideoChange,
         onAutoReturnHomeOnCompletionChange = onAutoReturnHomeOnCompletionChange,
         onShowClockChange = onShowClockChange,
+        onShowMiniProgressBarChange = onShowMiniProgressBarChange,
         onAutoConfirmOnFocusChange = onAutoConfirmOnFocusChange,
         onAutoRefreshOnSwitchChange = onAutoRefreshOnSwitchChange,
         modifier = Modifier.weight(1f),
@@ -231,6 +239,8 @@ private fun SettingsBehaviorColumn(
   onMoveSettingFocus: (Int, Int) -> Boolean,
   onMoveLeftToNav: () -> Boolean,
   onVisualPerformanceModeChange: (AppVisualPerformanceMode) -> Unit,
+  liquidGlassCardsSupported: Boolean,
+  onLiquidGlassCardsEnabledChange: (Boolean) -> Unit,
   onHomeThemeVariantChange: (HomeThemeVariant) -> Unit,
   onChineseTextVariantChange: (ChineseTextVariant) -> Unit,
   onClearCache: () -> Unit,
@@ -243,6 +253,7 @@ private fun SettingsBehaviorColumn(
   onAutoPlayRelatedVideoChange: (Boolean) -> Unit,
   onAutoReturnHomeOnCompletionChange: (Boolean) -> Unit,
   onShowClockChange: (Boolean) -> Unit,
+  onShowMiniProgressBarChange: (Boolean) -> Unit,
   onAutoConfirmOnFocusChange: (Boolean) -> Unit,
   onAutoRefreshOnSwitchChange: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
@@ -402,12 +413,6 @@ private fun SettingsBehaviorColumn(
         onCheckedChange = onAutoReturnHomeOnCompletionChange,
       )
     }
-    item(key = "ui-header") {
-      SettingsSectionTitle(
-        text = stringResource(R.string.settings_interaction_section),
-        modifier = Modifier.padding(top = BiliSpacing.Lg),
-      )
-    }
     item(key = "show-clock") {
       SettingsToggleRow(
         title = stringResource(R.string.settings_show_clock_title),
@@ -422,6 +427,92 @@ private fun SettingsBehaviorColumn(
           ),
         onFocused = { onSettingFocused(SettingsItemShowClock) },
         onCheckedChange = onShowClockChange,
+      )
+    }
+    item(key = "show-mini-progress-bar") {
+      SettingsToggleRow(
+        title = stringResource(R.string.settings_show_mini_progress_bar_title),
+        description = stringResource(R.string.settings_show_mini_progress_bar_description),
+        checked = settings.showMiniProgressBar,
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemShowMiniProgressBar))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemShowMiniProgressBar,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+          ),
+        onFocused = { onSettingFocused(SettingsItemShowMiniProgressBar) },
+        onCheckedChange = onShowMiniProgressBarChange,
+      )
+    }
+    item(key = "ui-header") {
+      SettingsSectionTitle(
+        text = stringResource(R.string.settings_interaction_section),
+        modifier = Modifier.padding(top = BiliSpacing.Lg),
+      )
+    }
+    item(key = "visual-performance-mode") {
+      val performanceOptions = remember { AppVisualPerformanceMode.entries.toList() }
+      val effectiveMode = settings.visualPerformanceMode
+      SettingsOptionRow(
+        title = stringResource(R.string.settings_visual_performance_title),
+        description = stringResource(R.string.settings_visual_performance_description),
+        value = effectiveMode.visualPerformanceLabel(),
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemVisualPerformanceMode))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemVisualPerformanceMode,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+        ),
+        onFocused = { onSettingFocused(SettingsItemVisualPerformanceMode) },
+        onClick = {
+          val currentIndex = performanceOptions.indexOf(effectiveMode).takeIf { it >= 0 } ?: 0
+          onVisualPerformanceModeChange(performanceOptions[(currentIndex + 1) % performanceOptions.size])
+        },
+      )
+    }
+    item(key = "liquid-glass-cards") {
+      val liquidGlassEnabled = settings.visualPerformanceMode == AppVisualPerformanceMode.Refined && liquidGlassCardsSupported
+      SettingsToggleRow(
+        title = stringResource(R.string.settings_liquid_glass_cards_title),
+        description = if (liquidGlassCardsSupported) {
+          stringResource(R.string.settings_liquid_glass_cards_description)
+        } else {
+          stringResource(R.string.settings_liquid_glass_cards_unsupported_description)
+        },
+        checked = liquidGlassEnabled && settings.liquidGlassCardsEnabled,
+        enabled = liquidGlassEnabled,
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemLiquidGlassCards))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemLiquidGlassCards,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+          ),
+        onFocused = { onSettingFocused(SettingsItemLiquidGlassCards) },
+        onCheckedChange = onLiquidGlassCardsEnabledChange,
+      )
+    }
+    item(key = "home-theme-variant") {
+      val themeOptions = remember { HomeThemeVariant.entries.toList() }
+      val effectiveTheme = settings.homeThemeVariant
+      SettingsOptionRow(
+        title = stringResource(R.string.settings_home_theme_title),
+        description = stringResource(R.string.settings_home_theme_description),
+        value = effectiveTheme.homeThemeLabel(),
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemHomeThemeVariant))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemHomeThemeVariant,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+          ),
+        onFocused = { onSettingFocused(SettingsItemHomeThemeVariant) },
+        onClick = {
+          val currentIndex = themeOptions.indexOf(effectiveTheme).takeIf { it >= 0 } ?: 0
+          onHomeThemeVariantChange(themeOptions[(currentIndex + 1) % themeOptions.size])
+        },
       )
     }
     item(key = "auto-confirm-on-focus") {
@@ -461,48 +552,6 @@ private fun SettingsBehaviorColumn(
       SettingsSectionTitle(
         text = stringResource(R.string.settings_performance_section),
         modifier = Modifier.padding(top = BiliSpacing.Lg),
-      )
-    }
-    item(key = "visual-performance-mode") {
-      val performanceOptions = remember { AppVisualPerformanceMode.entries.toList() }
-      val effectiveMode = settings.visualPerformanceMode
-      SettingsOptionRow(
-        title = stringResource(R.string.settings_visual_performance_title),
-        description = stringResource(R.string.settings_visual_performance_description),
-        value = effectiveMode.visualPerformanceLabel(),
-        modifier = Modifier
-          .focusRequester(focusRequesters.getValue(SettingsItemVisualPerformanceMode))
-          .settingsBoundaryKeys(
-            itemIndex = SettingsItemVisualPerformanceMode,
-            onMoveSettingFocus = onMoveSettingFocus,
-            onMoveLeftToNav = onMoveLeftToNav,
-        ),
-        onFocused = { onSettingFocused(SettingsItemVisualPerformanceMode) },
-        onClick = {
-          val currentIndex = performanceOptions.indexOf(effectiveMode).takeIf { it >= 0 } ?: 0
-          onVisualPerformanceModeChange(performanceOptions[(currentIndex + 1) % performanceOptions.size])
-        },
-      )
-    }
-    item(key = "home-theme-variant") {
-      val themeOptions = remember { HomeThemeVariant.entries.toList() }
-      val effectiveTheme = settings.homeThemeVariant
-      SettingsOptionRow(
-        title = stringResource(R.string.settings_home_theme_title),
-        description = stringResource(R.string.settings_home_theme_description),
-        value = effectiveTheme.homeThemeLabel(),
-        modifier = Modifier
-          .focusRequester(focusRequesters.getValue(SettingsItemHomeThemeVariant))
-          .settingsBoundaryKeys(
-            itemIndex = SettingsItemHomeThemeVariant,
-            onMoveSettingFocus = onMoveSettingFocus,
-            onMoveLeftToNav = onMoveLeftToNav,
-          ),
-        onFocused = { onSettingFocused(SettingsItemHomeThemeVariant) },
-        onClick = {
-          val currentIndex = themeOptions.indexOf(effectiveTheme).takeIf { it >= 0 } ?: 0
-          onHomeThemeVariantChange(themeOptions[(currentIndex + 1) % themeOptions.size])
-        },
       )
     }
     item(key = "clear-cache") {
@@ -760,13 +809,15 @@ private const val SettingsItemConfirmPlaybackExit = 5
 private const val SettingsItemAutoPlayNextEpisode = 6
 private const val SettingsItemAutoPlayRelatedVideo = 7
 private const val SettingsItemAutoReturnHomeOnCompletion = 8
-private const val SettingsItemShowClock = 10
-private const val SettingsItemAutoConfirmOnFocus = 11
-private const val SettingsItemAutoRefreshOnSwitch = 12
-private const val SettingsItemVisualPerformanceMode = 14
-private const val SettingsItemHomeThemeVariant = 15
-private const val SettingsItemClearCache = 16
-private const val SettingsItemChineseTextVariant = 17
+private const val SettingsItemShowClock = 9
+private const val SettingsItemShowMiniProgressBar = 10
+private const val SettingsItemVisualPerformanceMode = 12
+private const val SettingsItemLiquidGlassCards = 13
+private const val SettingsItemHomeThemeVariant = 14
+private const val SettingsItemAutoConfirmOnFocus = 15
+private const val SettingsItemAutoRefreshOnSwitch = 16
+private const val SettingsItemClearCache = 18
+private const val SettingsItemChineseTextVariant = 19
 
 private val SettingsFocusableItems = listOf(
   SettingsItemPlaybackQuality,
@@ -778,10 +829,12 @@ private val SettingsFocusableItems = listOf(
   SettingsItemAutoPlayRelatedVideo,
   SettingsItemAutoReturnHomeOnCompletion,
   SettingsItemShowClock,
+  SettingsItemShowMiniProgressBar,
+  SettingsItemVisualPerformanceMode,
+  SettingsItemLiquidGlassCards,
+  SettingsItemHomeThemeVariant,
   SettingsItemAutoConfirmOnFocus,
   SettingsItemAutoRefreshOnSwitch,
-  SettingsItemVisualPerformanceMode,
-  SettingsItemHomeThemeVariant,
   SettingsItemClearCache,
   SettingsItemChineseTextVariant,
 )

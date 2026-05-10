@@ -2,6 +2,7 @@ package com.kirin.bilitv.core.settings
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -28,6 +29,7 @@ class AppSettingsStore(private val context: Context) {
 
     val autoConfirmOnFocus = preferences[Keys.AutoConfirmOnFocus] ?: false
     val autoRefreshOnSwitch = autoConfirmOnFocus && (preferences[Keys.AutoRefreshOnSwitch] ?: false)
+    val liquidGlassCardsEnabled = supportsLiquidGlassCards() && (preferences[Keys.LiquidGlassCardsEnabled] ?: false)
 
     val visualPerformanceMode = preferences[Keys.VisualPerformanceMode]
       ?.let(AppVisualPerformanceMode::fromKey)
@@ -50,8 +52,10 @@ class AppSettingsStore(private val context: Context) {
       autoPlayRelatedVideo = preferences[Keys.AutoPlayRelatedVideo] ?: false,
       autoReturnHomeOnCompletion = preferences[Keys.AutoReturnHomeOnCompletion] ?: false,
       showClock = preferences[Keys.ShowClock] ?: true,
+      showMiniProgressBar = preferences[Keys.ShowMiniProgressBar] ?: true,
       autoConfirmOnFocus = autoConfirmOnFocus,
       autoRefreshOnSwitch = autoRefreshOnSwitch,
+      liquidGlassCardsEnabled = liquidGlassCardsEnabled,
       enabledHomeSections = enabledSections,
     )
   }
@@ -133,6 +137,12 @@ class AppSettingsStore(private val context: Context) {
     }
   }
 
+  suspend fun setShowMiniProgressBar(enabled: Boolean) {
+    context.biliDataStore.edit { preferences ->
+      preferences[Keys.ShowMiniProgressBar] = enabled
+    }
+  }
+
   suspend fun setAutoConfirmOnFocus(enabled: Boolean) {
     context.biliDataStore.edit { preferences ->
       preferences[Keys.AutoConfirmOnFocus] = enabled
@@ -145,6 +155,12 @@ class AppSettingsStore(private val context: Context) {
   suspend fun setAutoRefreshOnSwitch(enabled: Boolean) {
     context.biliDataStore.edit { preferences ->
       preferences[Keys.AutoRefreshOnSwitch] = enabled && (preferences[Keys.AutoConfirmOnFocus] ?: false)
+    }
+  }
+
+  suspend fun setLiquidGlassCardsEnabled(enabled: Boolean) {
+    context.biliDataStore.edit { preferences ->
+      preferences[Keys.LiquidGlassCardsEnabled] = enabled && supportsLiquidGlassCards()
     }
   }
 
@@ -179,10 +195,16 @@ class AppSettingsStore(private val context: Context) {
     val AutoPlayRelatedVideo = booleanPreferencesKey("auto_play_related_video")
     val AutoReturnHomeOnCompletion = booleanPreferencesKey("auto_return_home_on_completion")
     val ShowClock = booleanPreferencesKey("show_clock")
+    val ShowMiniProgressBar = booleanPreferencesKey("show_mini_progress_bar")
     val AutoConfirmOnFocus = booleanPreferencesKey("auto_confirm_on_focus")
     val AutoRefreshOnSwitch = booleanPreferencesKey("auto_refresh_on_switch")
+    val LiquidGlassCardsEnabled = booleanPreferencesKey("liquid_glass_cards_enabled")
     val EnabledHomeSections = stringSetPreferencesKey("enabled_home_sections")
   }
+}
+
+fun supportsLiquidGlassCards(): Boolean {
+  return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 }
 
 private fun Context.defaultVisualPerformanceMode(): AppVisualPerformanceMode {

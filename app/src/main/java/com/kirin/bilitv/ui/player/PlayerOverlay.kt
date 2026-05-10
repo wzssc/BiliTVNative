@@ -1,7 +1,7 @@
 package com.kirin.bilitv.ui.player
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.BorderStroke
+import androidx.annotation.StringRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
@@ -66,6 +68,7 @@ import com.kirin.bilitv.core.player.PlaybackVideoMetadata
 import com.kirin.bilitv.core.player.VideoshotData
 import com.kirin.bilitv.core.player.VideoshotFrame
 import com.kirin.bilitv.ui.common.ClockOverlay
+import com.kirin.bilitv.ui.glass.biliLiquidGlassSurface
 import com.kirin.bilitv.ui.i18n.convertChineseText
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
 import com.kirin.bilitv.ui.theme.BiliColors
@@ -123,18 +126,21 @@ internal fun BoxScope.PlayerOverlay(
   focusedPanelIndex: Int,
   playbackSpeed: Float,
   danmakuSettings: DanmakuSettings,
-  positionMs: Long,
-  durationMs: Long,
-  bufferedPercentage: Long,
+  positionState: State<Long>,
+  durationState: State<Long>,
+  bufferedPercentageState: State<Long>,
   airJumpSegments: List<AirJumpSegment>,
   previewPositionMs: Long?,
   showClock: Boolean,
+  clockText: String,
+  showMiniProgressBar: Boolean,
 ) {
   if (controlsVisible) {
     PlayerTopOverlay(
       request = request,
       title = info.title,
       showClock = showClock,
+      clockText = clockText,
       modifier = Modifier.align(Alignment.TopCenter),
     )
     PlayerBottomOverlay(
@@ -142,9 +148,9 @@ internal fun BoxScope.PlayerOverlay(
       info = info,
       focusedControl = focusedControl,
       progressFocused = progressFocused,
-      positionMs = positionMs,
-      durationMs = durationMs,
-      bufferedPercentage = bufferedPercentage,
+      positionState = positionState,
+      durationState = durationState,
+      bufferedPercentageState = bufferedPercentageState,
       airJumpSegments = airJumpSegments,
       previewPositionMs = previewPositionMs,
       danmakuSettings = danmakuSettings,
@@ -155,6 +161,7 @@ internal fun BoxScope.PlayerOverlay(
   } else {
     if (showClock) {
       ClockOverlay(
+        clockText = clockText,
         modifier = Modifier
           .align(Alignment.TopEnd)
           .padding(
@@ -163,18 +170,20 @@ internal fun BoxScope.PlayerOverlay(
           ),
       )
     }
-    MiniProgressBar(
-      positionMs = positionMs,
-      durationMs = durationMs,
-      airJumpSegments = airJumpSegments,
-      modifier = Modifier.align(Alignment.BottomCenter),
-    )
+    if (showMiniProgressBar) {
+      MiniProgressBar(
+        positionState = positionState,
+        durationState = durationState,
+        airJumpSegments = airJumpSegments,
+        modifier = Modifier.align(Alignment.BottomCenter),
+      )
+    }
   }
 
   if (previewPositionMs != null) {
     SeekPreviewOverlay(
       previewPositionMs = previewPositionMs,
-      durationMs = durationMs,
+      durationMs = durationState.value,
       videoshotData = if (seekPreviewSpritesEnabled) videoshotData else null,
       videoshotSprites = videoshotSprites,
       modifier = Modifier.align(Alignment.Center),
@@ -241,11 +250,16 @@ internal fun BoxScope.PlayerOverlay(
 
 @Composable
 private fun PauseIndicatorOverlay(modifier: Modifier = Modifier) {
+  val shape = CircleShape
   Box(
     modifier = modifier
       .size(BiliSizing.PlayerPauseIndicatorSize)
-      .clip(CircleShape)
-      .background(BiliColors.OverlayStrong),
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = true,
+        surfaceColor = BiliColors.OverlayStrong,
+      ),
     contentAlignment = Alignment.Center,
   ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -276,6 +290,7 @@ private fun PlayerTopOverlay(
   request: PlaybackRequest,
   title: String,
   showClock: Boolean,
+  clockText: String,
   modifier: Modifier = Modifier,
 ) {
   val displayTitle = convertChineseText(title.ifBlank { request.title })
@@ -338,6 +353,7 @@ private fun PlayerTopOverlay(
     }
     if (showClock) {
       ClockOverlay(
+        clockText = clockText,
         modifier = Modifier
           .align(Alignment.TopEnd)
           .padding(
@@ -382,9 +398,9 @@ private fun PlayerBottomOverlay(
   info: PlaybackInfo,
   focusedControl: PlayerControl,
   progressFocused: Boolean,
-  positionMs: Long,
-  durationMs: Long,
-  bufferedPercentage: Long,
+  positionState: State<Long>,
+  durationState: State<Long>,
+  bufferedPercentageState: State<Long>,
   airJumpSegments: List<AirJumpSegment>,
   previewPositionMs: Long?,
   danmakuSettings: DanmakuSettings,
@@ -413,20 +429,19 @@ private fun PlayerBottomOverlay(
       verticalAlignment = Alignment.CenterVertically,
     ) {
       TvProgressBar(
-        positionMs = positionMs,
-        durationMs = durationMs,
-        bufferedPercentage = bufferedPercentage,
+        positionState = positionState,
+        durationState = durationState,
+        bufferedPercentageState = bufferedPercentageState,
         airJumpSegments = airJumpSegments,
         isFocused = progressFocused,
         previewPositionMs = previewPositionMs,
         modifier = Modifier.weight(1f),
       )
       Spacer(modifier = Modifier.width(BiliSpacing.Xl))
-      Text(
-        text = "${(previewPositionMs ?: positionMs).toPlayerTime()} / ${durationMs.toPlayerTime()}",
-        color = BiliColors.TextPrimary,
-        fontSize = BiliTypography.PlayerTime,
-        fontWeight = FontWeight.Bold,
+      PlayerTimeText(
+        positionState = positionState,
+        durationState = durationState,
+        previewPositionMs = previewPositionMs,
       )
     }
     Spacer(modifier = Modifier.height(BiliSpacing.Lg))
@@ -462,11 +477,16 @@ private fun PlayerIconButton(
   contentDescription: String,
   focused: Boolean,
 ) {
+  val shape = RoundedCornerShape(BiliRadius.Card)
   Box(
     modifier = Modifier
       .size(BiliSizing.PlayerControlIconButtonSize)
-      .clip(RoundedCornerShape(BiliRadius.Card))
-      .background(if (focused) BiliColors.PlayerControlFocused else BiliColors.PlayerControlIdle),
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = focused,
+        surfaceColor = if (focused) BiliColors.PlayerControlFocused else BiliColors.PlayerControlIdle,
+      ),
     contentAlignment = Alignment.Center,
   ) {
     Icon(
@@ -475,6 +495,47 @@ private fun PlayerIconButton(
       tint = BiliColors.TextPrimary,
       modifier = Modifier.size(BiliSizing.PlayerControlIconSize),
     )
+  }
+}
+
+@Composable
+private fun Modifier.playerLiquidGlassSurface(
+  shape: Shape,
+  focused: Boolean,
+  surfaceColor: Color,
+): Modifier {
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val liquidGlassEnabled = performancePolicy.cinematicVisualEffectsEnabled && performancePolicy.liquidGlassCardsEnabled
+  return biliLiquidGlassSurface(
+    enabled = liquidGlassEnabled,
+    shape = shape,
+    surfaceColor = surfaceColor,
+    borderColor = BiliColors.TextPrimary.copy(
+      alpha = if (focused) {
+        BiliFocus.LiquidGlassFocusedBorderAlpha
+      } else {
+        BiliFocus.LiquidGlassRestingBorderAlpha
+      },
+    ),
+    borderWidth = BiliFocus.RestingBorderWidth,
+  )
+}
+
+@Composable
+private fun Modifier.playerFocusedLiquidGlassSurface(
+  shape: Shape,
+  focused: Boolean,
+  surfaceColor: Color = BiliColors.PlayerPanelFocused,
+): Modifier {
+  return if (focused) {
+    clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = true,
+        surfaceColor = surfaceColor,
+      )
+  } else {
+    background(BiliColors.Transparent)
   }
 }
 
@@ -522,10 +583,24 @@ private fun PlayerStatusTexts(
 }
 
 @Composable
+private fun PlayerTimeText(
+  positionState: State<Long>,
+  durationState: State<Long>,
+  previewPositionMs: Long?,
+) {
+  Text(
+    text = "${(previewPositionMs ?: positionState.value).toPlayerTime()} / ${durationState.value.toPlayerTime()}",
+    color = BiliColors.TextPrimary,
+    fontSize = BiliTypography.PlayerTime,
+    fontWeight = FontWeight.Bold,
+  )
+}
+
+@Composable
 private fun TvProgressBar(
-  positionMs: Long,
-  durationMs: Long,
-  bufferedPercentage: Long,
+  positionState: State<Long>,
+  durationState: State<Long>,
+  bufferedPercentageState: State<Long>,
   airJumpSegments: List<AirJumpSegment>,
   isFocused: Boolean,
   previewPositionMs: Long?,
@@ -536,6 +611,9 @@ private fun TvProgressBar(
       .fillMaxWidth()
       .height(BiliSizing.PlayerProgressTouchHeight),
   ) {
+    val positionMs = positionState.value
+    val durationMs = durationState.value
+    val bufferedPercentage = bufferedPercentageState.value
     val progress = progressFraction(positionMs, durationMs)
     val buffered = (bufferedPercentage / 100f).coerceIn(0f, 1f)
     val preview = previewPositionMs?.let { progressFraction(it, durationMs) }
@@ -596,8 +674,8 @@ private fun TvProgressBar(
 
 @Composable
 private fun MiniProgressBar(
-  positionMs: Long,
-  durationMs: Long,
+  positionState: State<Long>,
+  durationState: State<Long>,
   airJumpSegments: List<AirJumpSegment>,
   modifier: Modifier = Modifier,
 ) {
@@ -606,6 +684,8 @@ private fun MiniProgressBar(
       .fillMaxWidth()
       .height(BiliSizing.PlayerMiniProgressHeight),
   ) {
+    val positionMs = positionState.value
+    val durationMs = durationState.value
     val centerY = size.height / 2f
     val barHeight = size.height
     val radius = barHeight / 2f
@@ -651,12 +731,17 @@ private fun SeekPreviewOverlay(
     return
   }
 
+  val shape = RoundedCornerShape(BiliRadius.Panel)
   Column(
     modifier = modifier
       .width(BiliSizing.PlayerSeekPreviewWidth)
       .height(BiliSizing.PlayerSeekPreviewHeight)
-      .clip(RoundedCornerShape(BiliRadius.Panel))
-      .background(BiliColors.OverlayStrong)
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = true,
+        surfaceColor = BiliColors.OverlayStrong,
+      )
       .padding(BiliSpacing.Lg),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.Center,
@@ -745,6 +830,7 @@ private fun PlayerEpisodesPanel(
 ) {
   val listState = rememberLazyListState()
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val shape = RoundedCornerShape(topStart = BiliRadius.Panel, bottomStart = BiliRadius.Panel)
   LaunchedEffect(focusedIndex, episodes.size) {
     if (episodes.isNotEmpty()) {
       val target = focusedIndex.coerceIn(0, episodes.lastIndex)
@@ -760,7 +846,12 @@ private fun PlayerEpisodesPanel(
     modifier = modifier
       .width(BiliSizing.PlayerSettingsPanelWidth)
       .fillMaxHeight()
-      .background(BiliColors.PlayerPanel),
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = false,
+        surfaceColor = BiliColors.PlayerPanel,
+      ),
   ) {
     PlayerPanelTitleRow(titleRes = R.string.player_panel_episodes)
     PlayerPanelDivider()
@@ -798,6 +889,7 @@ private fun PlayerVideoListPanel(
 ) {
   val listState = rememberLazyListState()
   val performancePolicy = LocalBiliPerformancePolicy.current
+  val shape = RoundedCornerShape(topStart = BiliRadius.Panel, bottomStart = BiliRadius.Panel)
   val focusedVideoIndex = if (showUploaderHeader) focusedIndex - UpPanelHeaderItemCount else focusedIndex
   val scrollRevealPaddingPx = with(LocalDensity.current) { BiliSpacing.Sm.roundToPx() }
   LaunchedEffect(focusedVideoIndex, videos.size, scrollRevealPaddingPx) {
@@ -838,7 +930,12 @@ private fun PlayerVideoListPanel(
     modifier = modifier
       .width(BiliSizing.PlayerContentPanelWidth)
       .fillMaxHeight()
-      .background(BiliColors.PlayerPanel),
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = false,
+        surfaceColor = BiliColors.PlayerPanel,
+      ),
   ) {
     if (showUploaderHeader) {
       UploaderPanelHeader(
@@ -992,23 +1089,19 @@ private fun UpPanelChip(
   selected: Boolean,
 ) {
   val shape = RoundedCornerShape(BiliRadius.Pill)
+  val surfaceColor = when {
+    selected -> BiliColors.BiliPink
+    focused -> BiliColors.PlayerPanelFocused
+    else -> BiliColors.PlayerControlIdle
+  }
   Box(
     modifier = Modifier
       .height(BiliSizing.PlayerPanelChipHeight)
       .clip(shape)
-      .background(
-        when {
-          selected -> BiliColors.BiliPink
-          focused -> BiliColors.PlayerPanelFocused
-          else -> BiliColors.PlayerControlIdle
-        },
-      )
-      .then(
-        if (focused) {
-          Modifier.border(BorderStroke(BiliFocus.RestingBorderWidth, BiliColors.TextPrimary), shape)
-        } else {
-          Modifier
-        },
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = focused || selected,
+        surfaceColor = surfaceColor,
       )
       .padding(horizontal = BiliSpacing.Md),
     contentAlignment = Alignment.Center,
@@ -1029,11 +1122,16 @@ private fun UnfollowConfirmDialog(
   focusedConfirm: Boolean,
   modifier: Modifier = Modifier,
 ) {
+  val shape = RoundedCornerShape(BiliRadius.Panel)
   Column(
     modifier = modifier
       .width(BiliSizing.PlayerUnfollowDialogWidth)
-      .clip(RoundedCornerShape(BiliRadius.Panel))
-      .background(BiliColors.OverlayScrim)
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = false,
+        surfaceColor = BiliColors.OverlayScrim,
+      )
       .padding(BiliSpacing.Xl),
     verticalArrangement = Arrangement.spacedBy(BiliSpacing.Lg),
   ) {
@@ -1079,23 +1177,19 @@ private fun ConfirmDialogButton(
   modifier: Modifier = Modifier,
 ) {
   val shape = RoundedCornerShape(BiliRadius.Card)
+  val surfaceColor = when {
+    focused && destructive -> BiliColors.BiliPink
+    focused -> BiliColors.PlayerPanelFocused
+    else -> BiliColors.PlayerControlIdle
+  }
   Box(
     modifier = modifier
       .height(BiliSizing.PlayerUnfollowDialogButtonHeight)
       .clip(shape)
-      .background(
-        when {
-          focused && destructive -> BiliColors.BiliPink
-          focused -> BiliColors.PlayerPanelFocused
-          else -> BiliColors.PlayerControlIdle
-        },
-      )
-      .then(
-        if (focused) {
-          Modifier.border(BorderStroke(BiliFocus.RestingBorderWidth, BiliColors.TextPrimary), shape)
-        } else {
-          Modifier
-        },
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = focused,
+        surfaceColor = surfaceColor,
       )
       .padding(horizontal = BiliSpacing.Md),
     contentAlignment = Alignment.Center,
@@ -1150,25 +1244,14 @@ private fun EpisodeRow(
   focused: Boolean,
   selected: Boolean,
 ) {
+  val shape = RoundedCornerShape(BiliRadius.Card)
   Row(
     modifier = Modifier
       .fillMaxWidth()
       .height(BiliSizing.PlayerEpisodeRowHeight)
-      .background(if (focused) BiliColors.PlayerPanelFocused else BiliColors.Transparent),
+      .playerFocusedLiquidGlassSurface(shape = shape, focused = focused),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Box(
-      modifier = Modifier
-        .width(BiliSizing.PlayerEpisodeAccentWidth)
-        .fillMaxHeight()
-        .background(
-          when {
-            selected -> BiliColors.BiliPink
-            focused -> BiliColors.PlayerFocusGlow
-            else -> BiliColors.Transparent
-          },
-        ),
-    )
     Text(
       text = title,
       color = if (selected) BiliColors.BiliPink else BiliColors.TextPrimary,
@@ -1224,17 +1307,9 @@ private fun VideoPanelRow(
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(horizontal = BiliSpacing.Sm, vertical = BiliSpacing.Xs)
+      .padding(horizontal = BiliSpacing.Xs, vertical = BiliSpacing.Xxs)
       .height(BiliSizing.PlayerPanelVideoRowHeight)
-      .clip(shape)
-      .background(if (focused) BiliColors.PlayerPanelFocused else BiliColors.Transparent)
-      .then(
-        if (focused) {
-          Modifier.border(BorderStroke(BiliFocus.RestingBorderWidth, BiliColors.TextPrimary), shape)
-        } else {
-          Modifier
-        },
-      )
+      .playerFocusedLiquidGlassSurface(shape = shape, focused = focused)
       .padding(BiliSpacing.Sm),
     verticalAlignment = Alignment.CenterVertically,
   ) {
@@ -1253,44 +1328,60 @@ private fun VideoPanelRow(
         error = fallbackPainter,
           modifier = Modifier.fillMaxSize(),
       )
-      if (viewText.isNotBlank() || danmakuText.isNotBlank()) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.BottomCenter)
+          .fillMaxWidth()
+          .height(BiliSizing.VideoCoverGradientHeight)
+          .background(
+            Brush.verticalGradient(
+              colors = listOf(
+                BiliColors.OverlayTransparent,
+                BiliColors.OverlayScrim,
+              ),
+            ),
+          ),
+      )
+      if (viewText.isNotBlank() || danmakuText.isNotBlank() || video.duration > 0) {
         Row(
           modifier = Modifier
-            .align(Alignment.BottomStart)
-            .background(BiliColors.OverlayStrong, RoundedCornerShape(BiliRadius.Card))
-            .padding(horizontal = BiliSpacing.Xs, vertical = BiliSpacing.Xs),
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(horizontal = BiliSpacing.Sm, vertical = BiliSpacing.Sm),
+          horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Sm),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          if (viewText.isNotBlank()) {
-            VideoPanelMetric(
-              iconRes = R.drawable.ic_video_play_count,
-              contentDescription = stringResource(R.string.video_play_count_content_description),
-              text = viewText,
-            )
-          }
-          if (danmakuText.isNotBlank()) {
+          Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
             if (viewText.isNotBlank()) {
-              Spacer(modifier = Modifier.width(BiliSpacing.Sm))
+              VideoPanelMetric(
+                iconRes = R.drawable.ic_video_play_count,
+                contentDescription = stringResource(R.string.video_play_count_content_description),
+                text = viewText,
+              )
             }
-            VideoPanelMetric(
-              iconRes = R.drawable.ic_video_danmaku_count,
-              contentDescription = stringResource(R.string.video_danmaku_count_content_description),
-              text = danmakuText,
+            if (danmakuText.isNotBlank()) {
+              if (viewText.isNotBlank()) {
+                Spacer(modifier = Modifier.width(BiliSpacing.Sm))
+              }
+              VideoPanelMetric(
+                iconRes = R.drawable.ic_video_danmaku_count,
+                contentDescription = stringResource(R.string.video_danmaku_count_content_description),
+                text = danmakuText,
+              )
+            }
+          }
+          if (video.duration > 0) {
+            Text(
+              text = (video.duration.toLong() * 1000L).toPlayerTime(),
+              color = BiliColors.TextPrimary,
+              fontSize = BiliTypography.CardOverlay,
+              maxLines = 1,
             )
           }
         }
-      }
-      if (video.duration > 0) {
-        Text(
-          text = (video.duration.toLong() * 1000L).toPlayerTime(),
-          color = BiliColors.TextPrimary,
-          fontSize = BiliTypography.CardOverlay,
-          maxLines = 1,
-          modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .background(BiliColors.OverlayStrong, RoundedCornerShape(BiliRadius.Card))
-            .padding(horizontal = BiliSpacing.Xs, vertical = BiliSpacing.Xs),
-        )
       }
     }
     Spacer(modifier = Modifier.width(BiliSpacing.Md))
@@ -1355,11 +1446,30 @@ private fun PlayerSettingsPanel(
   danmakuSettings: DanmakuSettings,
   modifier: Modifier = Modifier,
 ) {
+  val shape = RoundedCornerShape(topStart = BiliRadius.Panel, bottomStart = BiliRadius.Panel)
+  val listState = rememberLazyListState()
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val rowCount = activePanel.settingsRowCount(info)
+  LaunchedEffect(activePanel, focusedIndex, rowCount) {
+    if (rowCount > 0) {
+      val target = focusedIndex.coerceIn(0, rowCount - 1)
+      if (performancePolicy.smoothScrollingEnabled) {
+        listState.animateScrollToItem(target)
+      } else {
+        listState.scrollToItem(target)
+      }
+    }
+  }
   Column(
     modifier = modifier
       .width(BiliSizing.PlayerSettingsPanelWidth)
       .fillMaxHeight()
-      .background(BiliColors.PlayerPanel),
+      .clip(shape)
+      .playerLiquidGlassSurface(
+        shape = shape,
+        focused = false,
+        surfaceColor = BiliColors.PlayerPanel,
+      ),
   ) {
     Row(
       modifier = Modifier
@@ -1391,33 +1501,95 @@ private fun PlayerSettingsPanel(
         .height(BiliSizing.PlayerSettingsDividerHeight)
         .background(BiliColors.PlayerPanelDivider),
     )
-    Column(modifier = Modifier.fillMaxWidth()) {
+    LazyColumn(
+      state = listState,
+      modifier = Modifier.fillMaxSize(),
+    ) {
       when (activePanel) {
-        PlayerPanel.Main -> MainSettingsRows(
-          focusedIndex = focusedIndex,
-          quality = info.selectedQuality.description.withCodecLabel(currentCodecText),
-          playbackSpeed = playbackSpeed,
-          danmakuSettings = danmakuSettings,
-        )
-        PlayerPanel.Quality -> QualityRows(
-          focusedIndex = focusedIndex,
-          qualities = info.qualities,
-          currentQuality = info.selectedQuality,
-        )
-        PlayerPanel.Danmaku -> DanmakuRows(
-          focusedIndex = focusedIndex,
-          settings = danmakuSettings,
-        )
-        PlayerPanel.Speed -> SpeedRows(
-          focusedIndex = focusedIndex,
-          playbackSpeed = playbackSpeed,
-        )
+        PlayerPanel.Main -> {
+          item(key = "quality") {
+            SettingsRow(
+              iconRes = R.drawable.ic_player_hd,
+              title = stringResource(R.string.player_settings_quality),
+              value = info.selectedQuality.description.withCodecLabel(currentCodecText),
+              focused = focusedIndex == 0,
+              trailingChevron = true,
+            )
+          }
+          item(key = "danmaku") {
+            SettingsRow(
+              iconRes = R.drawable.ic_player_subtitles,
+              title = stringResource(R.string.player_settings_danmaku),
+              value = if (danmakuSettings.enabled) stringResource(R.string.player_value_on) else stringResource(R.string.player_value_off),
+              focused = focusedIndex == 1,
+              trailingChevron = true,
+            )
+          }
+          item(key = "speed") {
+            SettingsRow(
+              iconRes = R.drawable.ic_player_speed,
+              title = stringResource(R.string.player_settings_speed),
+              value = playbackSpeed.speedText(),
+              focused = focusedIndex == 2,
+              trailingChevron = true,
+            )
+          }
+        }
+        PlayerPanel.Quality -> {
+          val qualities = info.qualities.ifEmpty { listOf(info.selectedQuality) }
+          itemsIndexed(qualities, key = { _, quality -> quality.id }) { index, quality ->
+            SettingsRow(
+              iconRes = R.drawable.ic_player_hd,
+              title = convertChineseText(quality.description),
+              value = if (quality.id == info.selectedQuality.id) stringResource(R.string.player_value_current) else "",
+              focused = focusedIndex == index,
+              trailingCheck = quality.id == info.selectedQuality.id,
+            )
+          }
+        }
+        PlayerPanel.Danmaku -> {
+          val rows = danmakuSettingRows(danmakuSettings)
+          itemsIndexed(rows) { index, row ->
+            SettingsRow(
+              iconRes = row.iconRes,
+              title = stringResource(row.titleRes),
+              value = row.valueRes?.let { valueRes -> stringResource(valueRes) } ?: row.value,
+              focused = focusedIndex == index,
+              adjustable = row.adjustable,
+            )
+          }
+        }
+        PlayerPanel.Speed -> {
+          itemsIndexed(PlayerSpeedOptions) { index, speed ->
+            val selected = speed == playbackSpeed
+            SettingsRow(
+              iconRes = R.drawable.ic_player_speed,
+              title = speed.speedText(),
+              value = if (selected) stringResource(R.string.player_value_current) else "",
+              focused = focusedIndex == index,
+              trailingCheck = selected,
+            )
+          }
+        }
         PlayerPanel.Episodes,
         PlayerPanel.UpVideos,
         PlayerPanel.RelatedVideos,
         PlayerPanel.None -> Unit
       }
     }
+  }
+}
+
+private fun PlayerPanel.settingsRowCount(info: PlaybackInfo): Int {
+  return when (this) {
+    PlayerPanel.Main -> 3
+    PlayerPanel.Quality -> info.qualities.size.coerceAtLeast(1)
+    PlayerPanel.Danmaku -> DanmakuSettingsRowCount
+    PlayerPanel.Speed -> PlayerSpeedOptions.size
+    PlayerPanel.Episodes,
+    PlayerPanel.UpVideos,
+    PlayerPanel.RelatedVideos,
+    PlayerPanel.None -> 0
   }
 }
 
@@ -1468,35 +1640,55 @@ private fun QualityRows(
   }
 }
 
-@Composable
-private fun DanmakuRows(
-  focusedIndex: Int,
-  settings: DanmakuSettings,
-) {
-  val rows = listOf(
-    DanmakuSettingRow(R.string.player_settings_danmaku_toggle, R.drawable.ic_player_subtitles, if (settings.enabled) stringResource(R.string.player_value_on) else stringResource(R.string.player_value_off)),
-    DanmakuSettingRow(R.string.player_settings_danmaku_opacity, R.drawable.ic_player_subtitles, "%.1f".format(Locale.US, settings.opacity), adjustable = true),
-    DanmakuSettingRow(R.string.player_settings_danmaku_font_size, R.drawable.ic_player_subtitles, settings.fontSize.toString(), adjustable = true),
-    DanmakuSettingRow(R.string.player_settings_danmaku_area, R.drawable.ic_player_subtitles, settings.area.areaText(), adjustable = true),
-    DanmakuSettingRow(R.string.player_settings_danmaku_speed, R.drawable.ic_player_speed, settings.speed.toString(), adjustable = true),
-    DanmakuSettingRow(R.string.player_settings_danmaku_top, R.drawable.ic_player_subtitles, if (settings.allowTop) stringResource(R.string.player_value_on) else stringResource(R.string.player_value_off)),
-    DanmakuSettingRow(R.string.player_settings_danmaku_bottom, R.drawable.ic_player_subtitles, if (settings.allowBottom) stringResource(R.string.player_value_on) else stringResource(R.string.player_value_off)),
+private fun danmakuSettingRows(settings: DanmakuSettings): List<DanmakuSettingRow> {
+  return listOf(
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_toggle,
+      iconRes = R.drawable.ic_player_subtitles,
+      valueRes = if (settings.enabled) R.string.player_value_on else R.string.player_value_off,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_opacity,
+      iconRes = R.drawable.ic_player_subtitles,
+      value = "%.1f".format(Locale.US, settings.opacity),
+      adjustable = true,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_font_size,
+      iconRes = R.drawable.ic_player_subtitles,
+      value = settings.fontSize.toString(),
+      adjustable = true,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_area,
+      iconRes = R.drawable.ic_player_subtitles,
+      valueRes = settings.area.areaTextRes(),
+      adjustable = true,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_speed,
+      iconRes = R.drawable.ic_player_speed,
+      value = settings.speed.toString(),
+      adjustable = true,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_top,
+      iconRes = R.drawable.ic_player_subtitles,
+      valueRes = if (settings.allowTop) R.string.player_value_on else R.string.player_value_off,
+    ),
+    DanmakuSettingRow(
+      titleRes = R.string.player_settings_danmaku_bottom,
+      iconRes = R.drawable.ic_player_subtitles,
+      valueRes = if (settings.allowBottom) R.string.player_value_on else R.string.player_value_off,
+    ),
   )
-  rows.forEachIndexed { index, row ->
-    SettingsRow(
-      iconRes = row.iconRes,
-      title = stringResource(row.titleRes),
-      value = row.value,
-      focused = focusedIndex == index,
-      adjustable = row.adjustable,
-    )
-  }
 }
 
 private data class DanmakuSettingRow(
-  val titleRes: Int,
+  @param:StringRes val titleRes: Int,
   @param:DrawableRes val iconRes: Int,
-  val value: String,
+  val value: String = "",
+  @param:StringRes val valueRes: Int? = null,
   val adjustable: Boolean = false,
 )
 
@@ -1527,11 +1719,12 @@ private fun SettingsRow(
   trailingCheck: Boolean = false,
   adjustable: Boolean = false,
 ) {
+  val shape = RoundedCornerShape(BiliRadius.Card)
   Row(
     modifier = Modifier
       .fillMaxWidth()
       .height(BiliSizing.PlayerSettingsRowHeight)
-      .background(if (focused) BiliColors.PlayerPanelFocused else BiliColors.Transparent)
+      .playerFocusedLiquidGlassSurface(shape = shape, focused = focused)
       .padding(horizontal = BiliSpacing.Lg),
     verticalAlignment = Alignment.CenterVertically,
   ) {
@@ -1721,11 +1914,16 @@ private fun Int.formatCompactCountText(): String {
 
 @Composable
 private fun Float.areaText(): String {
+  return stringResource(areaTextRes())
+}
+
+@StringRes
+private fun Float.areaTextRes(): Int {
   return when {
-    this >= 1f -> stringResource(R.string.player_area_full)
-    this >= 0.75f -> stringResource(R.string.player_area_three_quarters)
-    this >= 0.5f -> stringResource(R.string.player_area_half)
-    else -> stringResource(R.string.player_area_quarter)
+    this >= 1f -> R.string.player_area_full
+    this >= 0.75f -> R.string.player_area_three_quarters
+    this >= 0.5f -> R.string.player_area_half
+    else -> R.string.player_area_quarter
   }
 }
 
@@ -1762,6 +1960,7 @@ internal const val UpFocusSort = 0
 internal const val UpFocusFollow = 1
 internal const val UpPanelHeaderItemCount = 2
 
+private const val DanmakuSettingsRowCount = 7
 private const val SeekPreviewSpriteScale = 2f
 private const val SeekPreviewSpriteMaxWidth = 360f
 private const val SeekPreviewSpriteMaxHeight = 220f

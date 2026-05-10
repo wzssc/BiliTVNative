@@ -33,8 +33,12 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.kirin.bilitv.core.model.VideoSummary
 import com.kirin.bilitv.ui.common.VideoThumbnailPrefetcher
 import com.kirin.bilitv.ui.settings.LocalBiliPerformancePolicy
@@ -76,6 +80,8 @@ internal fun TvVideoGrid(
   onMoveUpFromFirstRow: () -> Boolean = { true },
   onBackKey: (() -> Boolean)? = null,
   horizontalPadding: Dp = BiliSizing.VideoGridHorizontalPadding,
+  topPadding: Dp = BiliFocus.ScrollInset,
+  topBleed: Dp = 0.dp,
   keyFactory: (Int, VideoSummary) -> Any = { _, video -> video.bvid },
 ) {
   val columns = BiliSizing.VideoGridColumns
@@ -90,7 +96,8 @@ internal fun TvVideoGrid(
   val coroutineScope = rememberCoroutineScope()
   val performancePolicy = LocalBiliPerformancePolicy.current
   val density = LocalDensity.current
-  val focusScrollInsetPx = with(density) { BiliFocus.ScrollInset.roundToPx() }
+  val topBleedPx = with(density) { topBleed.roundToPx() }
+  val focusScrollInsetPx = with(density) { topPadding.roundToPx() }
   val focusedRowTopPaddingPx = with(density) { BiliFocus.FocusedRowTopPadding.roundToPx() }
   val videoCardFallbackHeightPx = with(density) { BiliSizing.VideoCardMinHeight.roundToPx() }
   val restoredItemFocusRequester = remember { FocusRequester() }
@@ -107,6 +114,11 @@ internal fun TvVideoGrid(
   var focusedIndex by remember { mutableIntStateOf(-1) }
   var rowScrollActive by remember { mutableStateOf(false) }
   var rowScrollGeneration by remember { mutableIntStateOf(0) }
+  val focusScale = when {
+    !performancePolicy.motionEnabled -> 1f
+    performancePolicy.cinematicVisualEffectsEnabled -> BiliFocus.CinematicCardScale
+    else -> BiliFocus.CardScale
+  }
 
   VideoThumbnailPrefetcher(
     videos = videos,
@@ -121,7 +133,7 @@ internal fun TvVideoGrid(
       fallbackItemHeightPx = videoCardFallbackHeightPx,
       scrollInsetPx = focusScrollInsetPx,
       focusedRowTopPaddingPx = focusedRowTopPaddingPx,
-      focusScale = if (performancePolicy.motionEnabled) BiliFocus.CardScale else 1f,
+      focusScale = focusScale,
       smoothScroll = smoothScroll,
     )
   }
@@ -229,10 +241,36 @@ internal fun TvVideoGrid(
   CompositionLocalProvider(LocalBringIntoViewSpec provides TvGridBringIntoViewSpec) {
     LazyColumn(
       state = listState,
-      modifier = modifier.fillMaxSize(),
+      modifier = modifier
+        .fillMaxSize()
+        .layout { measurable, constraints ->
+          if (topBleedPx <= 0) {
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) {
+              placeable.place(0, 0)
+            }
+          } else {
+            val expandedMaxHeight = if (constraints.maxHeight == Constraints.Infinity) {
+              Constraints.Infinity
+            } else {
+              constraints.maxHeight + topBleedPx
+            }
+            val placeable = measurable.measure(
+              constraints.copy(maxHeight = expandedMaxHeight),
+            )
+            val layoutHeight = if (constraints.maxHeight == Constraints.Infinity) {
+              placeable.height
+            } else {
+              constraints.maxHeight
+            }
+            layout(placeable.width, layoutHeight) {
+              placeable.place(0, -topBleedPx)
+            }
+          }
+        },
       contentPadding = PaddingValues(
         start = horizontalPadding,
-        top = BiliFocus.ScrollInset,
+        top = topPadding,
         end = horizontalPadding,
         bottom = BiliSizing.VideoGridBottomPadding,
       ),
@@ -247,7 +285,15 @@ internal fun TvVideoGrid(
         contentType = { "video-row" },
       ) { row ->
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .zIndex(
+              if (focusedIndex >= 0 && focusedIndex / columns == row) {
+                BiliFocus.FocusedZIndex
+              } else {
+                0f
+              },
+            ),
           horizontalArrangement = Arrangement.spacedBy(BiliSizing.VideoGridSpacing),
         ) {
           repeat(columns) { column ->

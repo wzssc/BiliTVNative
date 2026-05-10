@@ -36,13 +36,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -88,10 +88,71 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
+@Stable
+internal class SearchUiState {
+  var searchText by mutableStateOf("")
+  var activeQuery by mutableStateOf<String?>(null)
+  var selectedOrderKey by mutableStateOf(SearchSortOptions.first().key)
+  var focusFirstResult by mutableStateOf(true)
+  var focusedResultIndex by mutableIntStateOf(0)
+  var focusedResultKey by mutableStateOf("")
+  var retryKey by mutableIntStateOf(0)
+  var resultState by mutableStateOf<SearchResultState>(SearchResultState.Loading)
+  var loadedQuery by mutableStateOf("")
+  var loadedOrderKey by mutableStateOf("")
+  var loadedRetryKey by mutableIntStateOf(-1)
+
+  fun startSearch(query: String) {
+    searchText = query
+    if (activeQuery != query) {
+      resetResultsForQuery(query)
+    }
+    activeQuery = query
+  }
+
+  fun backToKeyboard() {
+    activeQuery = null
+  }
+
+  fun clear() {
+    searchText = ""
+    activeQuery = null
+    resetResultsForQuery("")
+  }
+
+  fun selectOrder(orderKey: String) {
+    if (selectedOrderKey == orderKey) {
+      return
+    }
+    selectedOrderKey = orderKey
+    focusFirstResult = false
+    focusedResultIndex = 0
+    focusedResultKey = ""
+    retryKey = 0
+    resultState = SearchResultState.Loading
+    loadedQuery = ""
+    loadedOrderKey = ""
+    loadedRetryKey = -1
+  }
+
+  private fun resetResultsForQuery(query: String) {
+    selectedOrderKey = SearchSortOptions.first().key
+    focusFirstResult = true
+    focusedResultIndex = 0
+    focusedResultKey = ""
+    retryKey = 0
+    resultState = SearchResultState.Loading
+    loadedQuery = query.takeIf { it.isBlank() }.orEmpty()
+    loadedOrderKey = ""
+    loadedRetryKey = -1
+  }
+}
+
 @Composable
-fun SearchScreen(
+internal fun SearchScreen(
   videoRepository: VideoRepository,
   searchHistoryStore: SearchHistoryStore,
+  uiState: SearchUiState,
   firstItemFocusRequester: FocusRequester,
   restoreFocusRequestKey: Int,
   onRestoreFocusHandled: (Int) -> Unit,
@@ -100,28 +161,26 @@ fun SearchScreen(
 ) {
   val coroutineScope = rememberCoroutineScope()
   val searchHistory by searchHistoryStore.history.collectAsState(initial = emptyList())
-  var searchText by rememberSaveable { mutableStateOf("") }
-  var activeQuery by rememberSaveable { mutableStateOf<String?>(null) }
   var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
   var returnFocusToKeyboard by remember { mutableStateOf(false) }
   val screenFocusRequester = remember { FocusRequester() }
 
-  LaunchedEffect(searchText) {
-    if (searchText.isBlank()) {
+  LaunchedEffect(uiState.searchText) {
+    if (uiState.searchText.isBlank()) {
       suggestions = emptyList()
       return@LaunchedEffect
     }
 
     delay(SearchSuggestionDebounceMs)
     suggestions = runCatching {
-      videoRepository.getSearchSuggestions(searchText.trim())
+      videoRepository.getSearchSuggestions(uiState.searchText.trim())
     }.getOrElse {
       emptyList()
     }
   }
 
-  LaunchedEffect(activeQuery, returnFocusToKeyboard) {
-    if (activeQuery == null && returnFocusToKeyboard) {
+  LaunchedEffect(uiState.activeQuery, returnFocusToKeyboard) {
+    if (uiState.activeQuery == null && returnFocusToKeyboard) {
       withFrameNanos { }
       runCatching {
         firstItemFocusRequester.requestFocus()
@@ -130,7 +189,7 @@ fun SearchScreen(
     }
   }
 
-  val query = activeQuery
+  val query = uiState.activeQuery
   Box(
     modifier = Modifier
       .fillMaxSize()
@@ -139,13 +198,13 @@ fun SearchScreen(
   ) {
     if (query == null) {
       SearchKeyboardView(
-        searchText = searchText,
+        searchText = uiState.searchText,
         suggestions = suggestions,
         searchHistory = searchHistory,
         keyboardFocusRequester = firstItemFocusRequester,
         onMoveLeftToNav = onMoveLeftToNav,
         onTextChange = { nextText ->
-          searchText = nextText
+          uiState.searchText = nextText
         },
         onClearSearchHistory = {
           runCatching {
@@ -164,8 +223,7 @@ fun SearchScreen(
             coroutineScope.launch {
               searchHistoryStore.add(trimmed)
             }
-            searchText = trimmed
-            activeQuery = trimmed
+            uiState.startSearch(trimmed)
           }
         },
       )
@@ -173,12 +231,13 @@ fun SearchScreen(
       SearchResultsView(
         query = query,
         videoRepository = videoRepository,
+        uiState = uiState,
         firstResultFocusRequester = firstItemFocusRequester,
         restoreFocusRequestKey = restoreFocusRequestKey,
         onRestoreFocusHandled = onRestoreFocusHandled,
         onMoveLeftToNav = onMoveLeftToNav,
         onBackToKeyboard = {
-          activeQuery = null
+          uiState.backToKeyboard()
           returnFocusToKeyboard = true
         },
         onVideoSelected = onVideoSelected,
@@ -514,6 +573,7 @@ private fun SearchSuggestionItem(
 private fun SearchResultsView(
   query: String,
   videoRepository: VideoRepository,
+  uiState: SearchUiState,
   firstResultFocusRequester: FocusRequester,
   restoreFocusRequestKey: Int,
   onRestoreFocusHandled: (Int) -> Unit,
@@ -522,23 +582,25 @@ private fun SearchResultsView(
   onVideoSelected: (VideoSummary) -> Unit,
 ) {
   val coroutineScope = rememberCoroutineScope()
-  var selectedOrderKey by rememberSaveable(query) { mutableStateOf(SearchSortOptions.first().key) }
-  var focusFirstResult by rememberSaveable(query) { mutableStateOf(true) }
-  var focusedResultIndex by rememberSaveable(query, selectedOrderKey) { mutableIntStateOf(0) }
-  var focusedResultKey by rememberSaveable(query, selectedOrderKey) { mutableStateOf("") }
-  var retryKey by remember(query, selectedOrderKey) { mutableIntStateOf(0) }
-  var state by remember(query, selectedOrderKey) {
-    mutableStateOf<SearchResultState>(SearchResultState.Loading)
-  }
   val sortFocusRequesters = remember {
     SearchSortOptions.associate { option -> option.key to FocusRequester() }
   }
+  val selectedOrderKey = uiState.selectedOrderKey
 
-  LaunchedEffect(videoRepository, query, selectedOrderKey, retryKey) {
-    state = SearchResultState.Loading
-    focusedResultIndex = 0
-    focusedResultKey = ""
-    state = try {
+  LaunchedEffect(videoRepository, query, selectedOrderKey, uiState.retryKey) {
+    if (
+      uiState.loadedQuery == query &&
+      uiState.loadedOrderKey == selectedOrderKey &&
+      uiState.loadedRetryKey == uiState.retryKey &&
+      uiState.resultState !is SearchResultState.Loading
+    ) {
+      return@LaunchedEffect
+    }
+
+    uiState.resultState = SearchResultState.Loading
+    uiState.focusedResultIndex = 0
+    uiState.focusedResultKey = ""
+    val nextState = try {
       val videos = videoRepository.searchVideos(
         keyword = query,
         page = FirstPage,
@@ -560,29 +622,33 @@ private fun SearchResultsView(
     } catch (error: Exception) {
       SearchResultState.Failed(error.message.orEmpty())
     }
+    uiState.loadedQuery = query
+    uiState.loadedOrderKey = selectedOrderKey
+    uiState.loadedRetryKey = uiState.retryKey
+    uiState.resultState = nextState
   }
 
   fun loadNextPage() {
-    val currentState = state as? SearchResultState.Success ?: return
+    val currentState = uiState.resultState as? SearchResultState.Success ?: return
     if (currentState.loadingMore || currentState.endReached) {
       return
     }
 
     val pageToLoad = currentState.nextPage
     val orderToLoad = selectedOrderKey
-    state = currentState.copy(
+    uiState.resultState = currentState.copy(
       loadingMore = true,
       loadMoreError = "",
     )
 
     coroutineScope.launch {
-      state = try {
+      uiState.resultState = try {
         val nextVideos = videoRepository.searchVideos(
           keyword = query,
           page = pageToLoad,
           order = orderToLoad,
         )
-        val latestState = state as? SearchResultState.Success ?: return@launch
+        val latestState = uiState.resultState as? SearchResultState.Success ?: return@launch
         val mergedVideos = latestState.videos.appendUniqueByBvid(nextVideos)
         latestState.copy(
           videos = mergedVideos,
@@ -595,7 +661,7 @@ private fun SearchResultsView(
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
-        val latestState = state as? SearchResultState.Success ?: return@launch
+        val latestState = uiState.resultState as? SearchResultState.Success ?: return@launch
         latestState.copy(
           loadingMore = false,
           loadMoreError = error.message.orEmpty(),
@@ -623,10 +689,7 @@ private fun SearchResultsView(
       firstResultFocusRequester = firstResultFocusRequester,
       onMoveLeftToNav = onMoveLeftToNav,
       onOrderSelected = { orderKey ->
-        if (selectedOrderKey != orderKey) {
-          focusFirstResult = false
-          selectedOrderKey = orderKey
-        }
+        uiState.selectOrder(orderKey)
       },
     )
     Box(
@@ -634,14 +697,14 @@ private fun SearchResultsView(
         .fillMaxSize()
         .padding(top = BiliSpacing.Lg),
     ) {
-      when (val currentState = state) {
+      when (val currentState = uiState.resultState) {
         SearchResultState.Loading -> VideoGridSkeleton()
         SearchResultState.Empty -> FeedStatusScreen(message = stringResource(R.string.search_empty))
         is SearchResultState.Failed -> FeedStatusScreen(
           message = stringResource(R.string.search_failed_with_message, currentState.message),
           actionLabel = stringResource(R.string.action_retry),
           onAction = {
-            retryKey += 1
+            uiState.retryKey += 1
           },
         )
         is SearchResultState.Success -> SearchResultGrid(
@@ -649,18 +712,18 @@ private fun SearchResultsView(
           firstResultFocusRequester = firstResultFocusRequester,
           selectedSortFocusRequester = sortFocusRequesters.getValue(selectedOrderKey),
           restoredFocusIndex = currentState.videos.resolveFocusIndex(
-            focusKey = focusedResultKey,
-            fallbackIndex = focusedResultIndex,
+            focusKey = uiState.focusedResultKey,
+            fallbackIndex = uiState.focusedResultIndex,
           ),
           restoreFocusRequestKey = restoreFocusRequestKey,
           onRestoreFocusHandled = onRestoreFocusHandled,
-          focusFirstResult = focusFirstResult,
+          focusFirstResult = uiState.focusFirstResult,
           onFirstResultFocused = {
-            focusFirstResult = false
+            uiState.focusFirstResult = false
           },
           onFocusedIndexChange = { index, video ->
-            focusedResultIndex = index
-            focusedResultKey = video.focusRestoreKey()
+            uiState.focusedResultIndex = index
+            uiState.focusedResultKey = video.focusRestoreKey()
           },
           onLoadMore = ::loadNextPage,
           onMoveLeftToNav = onMoveLeftToNav,
@@ -1013,7 +1076,7 @@ private fun Int.shouldLoadMore(totalItems: Int, threshold: Int): Boolean {
   return totalItems - this <= threshold
 }
 
-private sealed interface SearchResultState {
+internal sealed interface SearchResultState {
   data object Loading : SearchResultState
   data object Empty : SearchResultState
   data class Failed(val message: String) : SearchResultState

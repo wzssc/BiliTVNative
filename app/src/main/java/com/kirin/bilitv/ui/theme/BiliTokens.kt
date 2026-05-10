@@ -110,25 +110,29 @@ object BiliRadius {
   val Card = 8.dp
   val Panel = 12.dp
   val Pill = 999.dp
-  val Sidebar = 5.dp
+  val Sidebar = 30.dp
 }
 
 object BiliSizing {
-  val SidebarWidth = 88.dp
-  val NavItemHeight = 56.dp
-  val NavIconSize = 28.dp
-  val AccountAvatarSize = 48.dp
-  val AccountAvatarContainerSize = 60.dp
+  val SidebarWidth = 76.dp
+  val NavItemHeight = 48.dp
+  val NavIconSize = 24.dp
+  val SidebarNavGroupTopPadding = 58.dp
+  val SidebarNavGroupSpacing = 26.dp
+  val AccountAvatarSize = 40.dp
+  val AccountAvatarContainerSize = 50.dp
   val AccountProfileAvatarSize = 96.dp
   val AccountProfilePanelWidth = 520.dp
   val AccountProfilePanelHeight = 180.dp
-  val AccountVipBadgeSize = 24.dp
+  val AccountVipBadgeSize = 20.dp
   val AccountProfileVipBadgeSize = 34.dp
   val ContentPadding = 16.dp
   val VideoCardWidth = 248.dp
   const val VideoGridColumns = 4
-  val VideoGridSpacing = 12.dp
+  val VideoGridSpacing = 10.dp
   val VideoGridHorizontalPadding = 0.dp
+  val HomeVideoGridTopPadding = 24.dp
+  val HomeVideoGridTopBleed = 16.dp
   val SearchVideoGridHorizontalPadding = 16.dp
   val VideoGridBottomPadding = 72.dp
   val VideoCardMinHeight = 240.dp
@@ -145,10 +149,14 @@ object BiliSizing {
   val SettingsCodecValueWidth = 112.dp
   val SettingsHomeSectionGridHeight = 156.dp
   const val SettingsHomeSectionColumns = 4
-  val HomeSectionTabHeight = 32.dp
+  val HomeSectionTabHeight = 40.dp
+  val HomeSectionCapsuleHeight = 58.dp
+  val HomeSectionCapsuleTopOffset = 6.dp
+  val HomeSectionCapsuleHorizontalPadding = 16.dp
+  val HomeSectionCapsuleVerticalPadding = 7.dp
+  val HomeSectionCapsuleItemSpacing = 20.dp
   val HomeSectionTabMinWidth = 72.dp
   val HomeSectionTabCompactMinWidth = 44.dp
-  val HomeSectionClockReservedWidth = 176.dp
   val SearchKeyboardPanelWidth = 380.dp
   val SearchInputHeight = 44.dp
   val SearchKeyboardButtonHeight = 48.dp
@@ -174,15 +182,15 @@ object BiliSizing {
   val PlayerControlIconSize = 36.dp
   val PlayerStatusMinWidth = 84.dp
   val PlayerSettingsPanelWidth = 350.dp
-  val PlayerContentPanelWidth = 400.dp
+  val PlayerContentPanelWidth = 500.dp
   val PlayerSettingsHeaderHeight = 72.dp
   val PlayerUpPanelHeaderHeight = 80.dp
   val PlayerSettingsRowHeight = 76.dp
   val PlayerEpisodeRowHeight = 54.dp
   val PlayerEpisodeAccentWidth = 4.dp
-  val PlayerPanelVideoRowHeight = 88.dp
-  val PlayerPanelVideoThumbnailWidth = 140.dp
-  val PlayerPanelVideoThumbnailHeight = 80.dp
+  val PlayerPanelVideoRowHeight = 132.dp
+  val PlayerPanelVideoThumbnailWidth = 208.dp
+  val PlayerPanelVideoThumbnailHeight = 117.dp
   val PlayerPanelAvatarSize = 48.dp
   val PlayerPanelChipHeight = 36.dp
   val PlayerUnfollowDialogWidth = 420.dp
@@ -206,8 +214,8 @@ object BiliTypography {
   val AccountProfileVipBadge = 22.sp
   val AccountProfileVipBadgeLineHeight = 22.sp
   val SearchInput = 18.sp
-  val HomeSectionTab = 15.sp
-  val HomeSectionTabLineHeight = 18.sp
+  val HomeSectionTab = 19.sp
+  val HomeSectionTabLineHeight = 23.sp
   val CardTitle = 14.sp
   val CardTitleLineHeight = 19.sp
   val CardMeta = 12.sp
@@ -247,15 +255,16 @@ object BiliMotion {
   const val PlayerProgressUpdateMs = 500L
   const val PlayerSeekPreviewAutoCommitMs = 1_200L
   const val PlayerClockUpdateMs = 30_000L
-  const val PlaybackTransitionScrimInMs = 90
-  const val PlaybackTransitionScrimHoldMs = 10
-  const val PlaybackTransitionScrimOutMs = 90
+  const val PlaybackTransitionScrimInMs = 30
+  const val PlaybackTransitionScrimHoldMs = 5
+  const val PlaybackTransitionScrimOutMs = 30
   val FocusEasing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
   val FocusScrollEasing = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1.0f)
 }
 
 object BiliFocus {
   const val CardScale = 1.055f
+  const val CinematicCardScale = 1.072f
   const val CinematicNavScale = 1.035f
   const val CoverHighlightAlpha = 0.08f
   const val CinematicCoverHighlightAlpha = 0.06f
@@ -263,7 +272,17 @@ object BiliFocus {
   const val FocusedZIndex = 1f
   const val ShadowAlpha = 0.34f
   const val CinematicFocusedBorderAlpha = 0.54f
-  const val CinematicCardFocusedBorderAlpha = 0.56f
+  const val CinematicCardGlassBorderAlpha = 0f
+  const val CinematicCardGlassOuterAlpha = 0.22f
+  const val CinematicCardGlassOuterSheenAlpha = 0.34f
+  const val CinematicCardGlassInnerAlpha = 0.16f
+  const val CinematicCardGlassInnerSheenAlpha = 0.38f
+  const val LiquidGlassFocusedBorderAlpha = 0.36f
+  const val LiquidGlassRestingBorderAlpha = 0.12f
+  const val LiquidGlassCardSurfaceAlpha = 0.18f
+  const val LiquidGlassCardInfoSurfaceAlpha = 0.46f
+  const val LiquidGlassCardFocusedOuterAlpha = 0.38f
+  const val LiquidGlassCardFocusedOuterDimAlpha = 0.08f
   const val CinematicRestingBorderAlpha = 0.14f
   const val CinematicCardRestingBorderAlpha = 0.10f
   const val CinematicFocusedBackgroundAlpha = 0.10f
@@ -319,13 +338,28 @@ object BiliFocus {
   const val HomeSidebarRefinedMidAlpha = 0.78f
   const val HomeSidebarRefinedEndAlpha = 0.70f
   const val HomeSidebarCinematicBorderAlpha = 0.22f
+  const val HomeSidebarLiquidGlassSurfaceAlpha = 0.62f
+  const val HomeSectionCapsuleSurfaceAlpha = 0.54f
+  const val HomeSectionCapsuleBorderAlpha = 0.18f
+  const val HomeSectionTabFocusedSurfaceAlpha = 0.08f
   const val SettingsChipSelectedBackgroundAlpha = 0.24f
   val BorderWidth = 3.dp
   val RestingBorderWidth = 1.dp
   val RestingShadowElevation = 0.dp
   val ShadowElevation = 12.dp
+  val RestingLift = 0.dp
+  val CinematicCardLift = 8.dp
+  val CinematicCardGlassSafeInset = 5.dp
+  val CinematicCardGlassOuterWidth = 3.dp
+  val CinematicCardGlassInnerWidth = 1.dp
+  val CinematicCardGlassInnerInset = 2.dp
+  val LiquidGlassCardFocusPadding = 4.dp
+  val LiquidGlassCardBorderWidth = 0.dp
+  val LiquidGlassBlurRadius = 3.dp
+  val LiquidGlassRefractionHeight = 20.dp
+  val LiquidGlassRefractionAmount = 34.dp
   val FocusedCoverBlurRadius = 6.dp
-  val ScrollInset = 20.dp
+  val ScrollInset = 32.dp
   val FocusedRowTopPadding = 56.dp
 
   data class HomeBackgroundBokehDot(
