@@ -1,6 +1,7 @@
 package com.kirin.bilitv.ui.settings
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -43,6 +44,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -53,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import com.kirin.bilitv.R
 import com.kirin.bilitv.core.i18n.ChineseTextVariant
 import com.kirin.bilitv.core.model.HomeSection
@@ -63,7 +66,9 @@ import com.kirin.bilitv.core.settings.AppSettings
 import com.kirin.bilitv.core.settings.AppVisualPerformanceMode
 import com.kirin.bilitv.core.settings.HomeThemeVariant
 import com.kirin.bilitv.ui.focus.BiliFocusableSurface
+import com.kirin.bilitv.ui.glass.biliLiquidGlassSurface
 import com.kirin.bilitv.ui.home.titleRes
+import com.kirin.bilitv.ui.login.createQrCodeBitmap
 import com.kirin.bilitv.ui.theme.BiliFocus
 import com.kirin.bilitv.ui.theme.BiliRadius
 import com.kirin.bilitv.ui.theme.BiliSizing
@@ -141,10 +146,12 @@ fun SettingsScreen(
       SettingsItemVisualPerformanceMode to FocusRequester(),
       SettingsItemLiquidGlassCards to FocusRequester(),
       SettingsItemHomeThemeVariant to FocusRequester(),
+      SettingsItemAbout to FocusRequester(),
     )
   }
   var lastFocusedSettingItem by remember { mutableIntStateOf(SettingsItemPlaybackQuality) }
   var focusSettingJob by remember { mutableStateOf<Job?>(null) }
+  var rightPanel by remember { mutableStateOf(SettingsRightPanel.HomeSections) }
 
   fun focusSettingItem(itemIndex: Int, direction: Int = 0): Boolean {
     focusSettingJob?.cancel()
@@ -194,6 +201,11 @@ fun SettingsScreen(
         focusRequesters = settingFocusRequesters,
         onSettingFocused = { itemIndex ->
           lastFocusedSettingItem = itemIndex
+          rightPanel = if (itemIndex == SettingsItemAbout) {
+            SettingsRightPanel.About
+          } else {
+            SettingsRightPanel.HomeSections
+          }
         },
         onMoveSettingFocus = ::moveSettingFocus,
         onMoveLeftToNav = onMoveLeftToNav,
@@ -215,14 +227,22 @@ fun SettingsScreen(
         onShowMiniProgressBarChange = onShowMiniProgressBarChange,
         onAutoConfirmOnFocusChange = onAutoConfirmOnFocusChange,
         onAutoRefreshOnSwitchChange = onAutoRefreshOnSwitchChange,
+        onAboutSelected = {
+          rightPanel = SettingsRightPanel.About
+        },
         modifier = Modifier.weight(1f),
       )
-      SettingsHomeSectionsColumn(
-        settings = settings,
-        onMoveLeftToSettings = { focusSettingItem(lastFocusedSettingItem) },
-        onHomeSectionEnabledChange = onHomeSectionEnabledChange,
-        modifier = Modifier.weight(1f),
-      )
+      when (rightPanel) {
+        SettingsRightPanel.HomeSections -> SettingsHomeSectionsColumn(
+          settings = settings,
+          onMoveLeftToSettings = { focusSettingItem(lastFocusedSettingItem) },
+          onHomeSectionEnabledChange = onHomeSectionEnabledChange,
+          modifier = Modifier.weight(1f),
+        )
+        SettingsRightPanel.About -> SettingsAboutColumn(
+          modifier = Modifier.weight(1f),
+        )
+      }
     }
   }
 }
@@ -256,6 +276,7 @@ private fun SettingsBehaviorColumn(
   onShowMiniProgressBarChange: (Boolean) -> Unit,
   onAutoConfirmOnFocusChange: (Boolean) -> Unit,
   onAutoRefreshOnSwitchChange: (Boolean) -> Unit,
+  onAboutSelected: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   CompositionLocalProvider(LocalBringIntoViewSpec provides SettingsBringIntoViewSpec) {
@@ -591,6 +612,22 @@ private fun SettingsBehaviorColumn(
         },
       )
     }
+    item(key = "about") {
+      SettingsActionRow(
+        title = stringResource(R.string.settings_about_title),
+        description = stringResource(R.string.settings_about_description),
+        value = "",
+        modifier = Modifier
+          .focusRequester(focusRequesters.getValue(SettingsItemAbout))
+          .settingsBoundaryKeys(
+            itemIndex = SettingsItemAbout,
+            onMoveSettingFocus = onMoveSettingFocus,
+            onMoveLeftToNav = onMoveLeftToNav,
+          ),
+        onFocused = { onSettingFocused(SettingsItemAbout) },
+        onClick = onAboutSelected,
+      )
+    }
   }
   }
 }
@@ -675,6 +712,196 @@ private fun SettingsHomeSectionsColumn(
         )
       }
     }
+  }
+}
+
+@Composable
+private fun SettingsAboutColumn(
+  modifier: Modifier = Modifier,
+) {
+  val homeColors = LocalHomeColors.current
+  val performancePolicy = LocalBiliPerformancePolicy.current
+  val panelShape = RoundedCornerShape(BiliRadius.Panel)
+  val projectUrl = SettingsAboutProjectUrl
+  val qrBitmap = remember(projectUrl) {
+    createQrCodeBitmap(projectUrl, SettingsAboutQrSizePx)
+  }
+  val libraryColumns = remember {
+    SettingsAboutLibraries.chunked(
+      (SettingsAboutLibraries.size + SettingsAboutLibraryColumnCount - 1) / SettingsAboutLibraryColumnCount,
+    )
+  }
+
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .biliLiquidGlassSurface(
+        enabled = performancePolicy.cinematicVisualEffectsEnabled &&
+          performancePolicy.liquidGlassCardsEnabled,
+        shape = panelShape,
+        surfaceColor = homeColors.cardSurface,
+        borderColor = homeColors.glassBorder,
+        borderWidth = BiliFocus.RestingBorderWidth,
+      ),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(BiliSpacing.Lg),
+      verticalArrangement = Arrangement.spacedBy(BiliSpacing.Lg),
+    ) {
+      Text(
+        text = stringResource(R.string.settings_about_title),
+        color = homeColors.textSecondary,
+        fontSize = BiliTypography.SectionTitle,
+        fontWeight = FontWeight.Bold,
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Xl),
+        verticalAlignment = Alignment.Top,
+      ) {
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(BiliSpacing.Md),
+        ) {
+          Text(
+            text = stringResource(R.string.settings_about_project_name),
+            color = homeColors.textPrimary,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          AboutTextBlock(
+            title = stringResource(R.string.settings_about_project_intro_title),
+            body = stringResource(R.string.settings_about_project_intro),
+          )
+        }
+        Box(
+          modifier = Modifier
+            .width(BiliSizing.LoginQrImageSize),
+          contentAlignment = Alignment.TopStart,
+        ) {
+          Box(
+            modifier = Modifier
+              .size(BiliSizing.LoginQrImageSize - BiliSpacing.Md)
+              .clip(RoundedCornerShape(BiliRadius.Card))
+              .background(Color.White)
+              .padding(BiliSpacing.Sm),
+            contentAlignment = Alignment.Center,
+          ) {
+            Image(
+              bitmap = qrBitmap.asImageBitmap(),
+              contentDescription = stringResource(R.string.settings_about_project_url_qr_content_description),
+              modifier = Modifier.fillMaxSize(),
+            )
+          }
+        }
+      }
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Xl),
+        verticalAlignment = Alignment.Top,
+      ) {
+        AboutTextBlock(
+          title = stringResource(R.string.settings_about_project_url_title),
+          body = projectUrl,
+          bodyMaxLines = 2,
+          modifier = Modifier.weight(1f),
+        )
+        AboutTextBlock(
+          title = stringResource(R.string.settings_about_license_title),
+          body = stringResource(R.string.settings_about_license_value),
+          bodyMaxLines = 1,
+          modifier = Modifier.width(BiliSizing.LoginQrImageSize),
+        )
+      }
+      Text(
+        text = stringResource(R.string.settings_about_libraries_title),
+        color = homeColors.textPrimary,
+        fontSize = BiliTypography.Body,
+        fontWeight = FontWeight.Bold,
+      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(BiliSpacing.Xl),
+      ) {
+        libraryColumns.forEach { libraries ->
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(BiliSpacing.Sm),
+          ) {
+            libraries.forEach { library ->
+              AboutLibraryLine(library = library)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AboutTextBlock(
+  title: String,
+  body: String,
+  bodyMaxLines: Int = Int.MAX_VALUE,
+  modifier: Modifier = Modifier,
+) {
+  val homeColors = LocalHomeColors.current
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(BiliSpacing.Xs),
+  ) {
+    Text(
+      text = title,
+      color = homeColors.textPrimary,
+      fontSize = BiliTypography.Body,
+      fontWeight = FontWeight.Bold,
+    )
+    Text(
+      text = body,
+      color = homeColors.textSecondary,
+      fontSize = BiliTypography.BodySmall,
+      maxLines = bodyMaxLines,
+      overflow = TextOverflow.Ellipsis,
+    )
+  }
+}
+
+@Composable
+private fun AboutLibraryLine(
+  library: SettingsAboutLibrary,
+  modifier: Modifier = Modifier,
+) {
+  val homeColors = LocalHomeColors.current
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(BiliSpacing.Xs),
+  ) {
+    Text(
+      text = library.name,
+      color = homeColors.textPrimary,
+      fontSize = BiliTypography.BodySmall,
+      fontWeight = FontWeight.Bold,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    Text(
+      text = stringResource(library.descriptionRes),
+      color = homeColors.textSecondary,
+      fontSize = BiliTypography.CardMeta,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
+    Text(
+      text = library.url,
+      color = homeColors.textTertiary,
+      fontSize = BiliTypography.CardBadge,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+    )
   }
 }
 
@@ -818,6 +1045,7 @@ private const val SettingsItemAutoConfirmOnFocus = 15
 private const val SettingsItemAutoRefreshOnSwitch = 16
 private const val SettingsItemClearCache = 18
 private const val SettingsItemChineseTextVariant = 19
+private const val SettingsItemAbout = 20
 
 private val SettingsFocusableItems = listOf(
   SettingsItemPlaybackQuality,
@@ -837,6 +1065,39 @@ private val SettingsFocusableItems = listOf(
   SettingsItemAutoRefreshOnSwitch,
   SettingsItemClearCache,
   SettingsItemChineseTextVariant,
+  SettingsItemAbout,
+)
+
+private enum class SettingsRightPanel {
+  HomeSections,
+  About,
+}
+
+private data class SettingsAboutLibrary(
+  val name: String,
+  val descriptionRes: Int,
+  val url: String,
+)
+
+private const val SettingsAboutProjectUrl = "https://github.com/Hyper-Beast/BiliTVNative"
+private const val SettingsAboutQrSizePx = 320
+private const val SettingsAboutLibraryColumnCount = 2
+
+private val SettingsAboutLibraries = listOf(
+  SettingsAboutLibrary("OkHttp", R.string.settings_about_library_okhttp, "https://square.github.io/okhttp/"),
+  SettingsAboutLibrary("Coil", R.string.settings_about_library_coil, "https://coil-kt.github.io/coil/"),
+  SettingsAboutLibrary(
+    "DanmakuRenderEngine",
+    R.string.settings_about_library_danmaku_render_engine,
+    "https://github.com/bytedance/DanmakuRenderEngine",
+  ),
+  SettingsAboutLibrary("OpenCC4J", R.string.settings_about_library_opencc4j, "https://github.com/houbb/opencc4j"),
+  SettingsAboutLibrary(
+    "AndroidLiquidGlass / Backdrop",
+    R.string.settings_about_library_liquid_glass,
+    "https://github.com/Kyant0/AndroidLiquidGlass",
+  ),
+  SettingsAboutLibrary("ZXing", R.string.settings_about_library_zxing, "https://github.com/zxing/zxing"),
 )
 
 @Composable
