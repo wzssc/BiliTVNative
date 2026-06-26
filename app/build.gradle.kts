@@ -4,7 +4,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
-val supportedAbis = setOf("armeabi-v7a", "arm64-v8a")
+val supportedAbis = setOf("arm64-v8a")
 val targetAbi = providers.gradleProperty("targetAbi").orNull?.trim()?.takeIf { it.isNotEmpty() }
 
 require(targetAbi == null || targetAbi in supportedAbis) {
