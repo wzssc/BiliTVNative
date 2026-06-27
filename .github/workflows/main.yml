@@ -20,4 +20,4 @@ jobs:
         with:
           name: BiliTVNative-custom
           # 这段路径用了双星号 **，不管 APK 藏在 release 还是 debug 目录下，都能立刻抓出来
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/
