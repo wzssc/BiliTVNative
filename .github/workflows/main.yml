@@ -5,9 +5,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -16,8 +16,8 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleDebug
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: BiliTVNative-custom
-          # 这段路径用了双星号 **，不管 APK 藏在 release 还是 debug 目录下，都能立刻抓出来
-          path: app/build/outputs/apk/debug/
+          # 匹配debug目录下所有apk安装包
+          path: app/build/outputs/apk/debug/*.apk
