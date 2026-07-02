@@ -1,40 +1,43 @@
 name: Build BiliTVNative APK
-# 修复报错核心：定义触发事件
+# 触发规则：推送代码/手动点按钮都能编译
 on:
-  # 推送到 main 分支自动编译
   push:
     branches: [ main ]
-  # 提交合并请求也编译校验
   pull_request:
     branches: [ main ]
+  workflow_dispatch: # 支持页面手动启动编译
 
 jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取仓库完整代码
+      # 拉取源码（升级v5消除Node20废弃警告）
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      # 2. 配置 JDK 17（Android Compose 推荐版本）
+      # 配置JDK17，适配Android Compose项目
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
-      # 3. 赋予 gradle 执行权限
+      # 赋予编译脚本执行权限
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 4. 执行打包，生成 release 安装包
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
+      # 同时编译Release正式包 + Debug测试包
+      - name: Build APK (Debug + Release)
+        run: ./gradlew assembleDebug assembleRelease
 
-      # 5. 上传编译好的 APK 到流水线产物（编译完成可下载）
-      - name: Upload built APK artifact
-        uses: actions/upload-artifact@v4
+      # 打印所有生成的APK路径，方便排查
+      - name: Locate built APK files
+        run: find . -name "*.apk"
+
+      # 上传所有模块下全部APK，万能通配符，不用管模块名是app/tv
+      - name: Upload compiled APK artifact
+        uses: actions/upload-artifact@v5
         with:
-          name: BiliTVNative-release-apk
-          path: app/build/outputs/apk/release/*.apk
+          name: BiliTVNative-All-APKs
+          path: '*/build/outputs/apk/*/*.apk'
