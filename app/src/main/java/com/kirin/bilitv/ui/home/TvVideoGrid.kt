@@ -84,7 +84,7 @@ internal fun TvVideoGrid(
   topBleed: Dp = 0.dp,
   keyFactory: (Int, VideoSummary) -> Any = { _, video -> video.bvid },
 ) {
-  val columns = BiliSizing.VideoGridColumns
+  val columns = 2
   val rowCount = (videos.size + columns - 1) / columns
   val restoreTargetIndex = restoredFocusIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
   val restoreTargetRow = if (videos.isEmpty()) {
